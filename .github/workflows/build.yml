@@ -591,10 +591,6 @@ jobs:
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
 
-          # Create directories for ROCm libraries
-          mkdir -p ./build/bin/rocblas/library
-          mkdir -p ./build/bin/hipblaslt/library
-
           # Move ROCm runtime libraries (to avoid double space consumption)
           sudo mv /opt/rocm/lib/librocsparse.so* ./build/bin/
           sudo mv /opt/rocm/lib/libhsa-runtime64.so* ./build/bin/
