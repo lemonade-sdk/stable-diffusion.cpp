@@ -558,11 +558,10 @@ jobs:
           mkdir build
           cd build
           cmake .. -G Ninja \
-            -DCMAKE_CXX_COMPILER=amdclang++ \
-            -DCMAKE_C_COMPILER=amdclang \
+            -DCMAKE_HIP_COMPILER="$(hipconfig -l)/clang" \
+            -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
             -DCMAKE_BUILD_TYPE=Release \
             -DSD_HIPBLAS=ON \
-            -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
             -DGPU_TARGETS="${{ matrix.gpu_targets }}" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
