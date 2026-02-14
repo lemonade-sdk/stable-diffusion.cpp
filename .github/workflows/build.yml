@@ -562,6 +562,7 @@ jobs:
             -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
             -DCMAKE_BUILD_TYPE=Release \
             -DSD_HIPBLAS=ON \
+            -DHIP_PLATFORM=amd \
             -DGPU_TARGETS="${{ matrix.gpu_targets }}" \
             -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
