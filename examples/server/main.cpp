@@ -194,7 +194,7 @@ void parse_args(int argc, const char** argv, SDSvrParams& svr_params, SDContextP
 
     if (!svr_params.process_and_check() ||
         !ctx_params.process_and_check(validation_mode) ||
-        !default_gen_params.process_and_check(validation_mode, ctx_params.lora_model_dir)) {
+        !default_gen_params.process_and_check(IMG_GEN, ctx_params.lora_model_dir)) {
         print_usage(argc, argv, options_vec);
         exit(1);
     }
