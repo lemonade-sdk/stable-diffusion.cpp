@@ -418,7 +418,7 @@ int main(int argc, const char** argv) {
         try {
             if (sd_ctx == nullptr) {
                 res.status = 400;
-                res.set_content(R"({"error":"no diffusion model loaded (server started in upscale-only mode)"})", "application/json");
+                res.set_content("{\"error\":\"no diffusion model loaded (server started in upscale-only mode)\"}", "application/json");
                 return;
             }
 
@@ -582,7 +582,7 @@ int main(int argc, const char** argv) {
         try {
             if (upscaler_ctx == nullptr) {
                 res.status = 400;
-                res.set_content(R"({"error":"no upscale model loaded (use --upscale-model)"})", "application/json");
+                res.set_content("{\"error\":\"no upscale model loaded (use --upscale-model)\"}", "application/json");
                 return;
             }
 
@@ -597,7 +597,7 @@ int main(int argc, const char** argv) {
             std::string image_b64 = j.value("image", "");
             if (image_b64.empty()) {
                 res.status = 400;
-                res.set_content(R"({"error":"image field required (base64 encoded)"})", "application/json");
+                res.set_content("{\"error\":\"image field required (base64 encoded)\"}", "application/json");
                 return;
             }
 
@@ -677,7 +677,7 @@ int main(int argc, const char** argv) {
         try {
             if (sd_ctx == nullptr) {
                 res.status = 400;
-                res.set_content(R"({"error":"no diffusion model loaded (server started in upscale-only mode)"})", "application/json");
+                res.set_content("{\"error\":\"no diffusion model loaded (server started in upscale-only mode)\"}", "application/json");
                 return;
             }
 
@@ -933,7 +933,7 @@ int main(int argc, const char** argv) {
         try {
             if (sd_ctx == nullptr) {
                 res.status = 400;
-                res.set_content(R"({"error":"no diffusion model loaded (server started in upscale-only mode)"})", "application/json");
+                res.set_content("{\"error\":\"no diffusion model loaded (server started in upscale-only mode)\"}", "application/json");
                 return;
             }
 
