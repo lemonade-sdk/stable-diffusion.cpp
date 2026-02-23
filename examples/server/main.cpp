@@ -189,9 +189,12 @@ void parse_args(int argc, const char** argv, SDSvrParams& svr_params, SDContextP
 
     const bool random_seed_requested = default_gen_params.seed < 0;
 
+    // Use UPSCALE mode for validation when only --upscale-model is provided (no diffusion model)
+    SDMode validation_mode = (ctx_params.model_path.empty() && ctx_params.diffusion_model_path.empty() && !ctx_params.esrgan_path.empty()) ? UPSCALE : IMG_GEN;
+
     if (!svr_params.process_and_check() ||
-        !ctx_params.process_and_check(IMG_GEN) ||
-        !default_gen_params.process_and_check(IMG_GEN, ctx_params.lora_model_dir)) {
+        !ctx_params.process_and_check(validation_mode) ||
+        !default_gen_params.process_and_check(validation_mode, ctx_params.lora_model_dir)) {
         print_usage(argc, argv, options_vec);
         exit(1);
     }
