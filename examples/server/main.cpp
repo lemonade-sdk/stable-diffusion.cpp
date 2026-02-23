@@ -189,8 +189,11 @@ void parse_args(int argc, const char** argv, SDSvrParams& svr_params, SDContextP
 
     const bool random_seed_requested = default_gen_params.seed < 0;
 
+    // Use UPSCALE mode for validation when only --upscale-model is provided (no diffusion model)
+    SDMode validation_mode = (ctx_params.model_path.empty() && ctx_params.diffusion_model_path.empty() && !ctx_params.esrgan_path.empty()) ? UPSCALE : IMG_GEN;
+
     if (!svr_params.process_and_check() ||
-        !ctx_params.process_and_check(IMG_GEN) ||
+        !ctx_params.process_and_check(validation_mode) ||
         !default_gen_params.process_and_check(IMG_GEN, ctx_params.lora_model_dir)) {
         print_usage(argc, argv, options_vec);
         exit(1);
@@ -288,11 +291,35 @@ int main(int argc, const char** argv) {
     LOG_DEBUG("%s", ctx_params.to_string().c_str());
     LOG_DEBUG("%s", default_gen_params.to_string().c_str());
 
-    sd_ctx_params_t sd_ctx_params = ctx_params.to_sd_ctx_params_t(false, false, false);
-    sd_ctx_t* sd_ctx              = new_sd_ctx(&sd_ctx_params);
+    // Create upscaler context if --upscale-model was provided
+    upscaler_ctx_t* upscaler_ctx = nullptr;
+    if (!ctx_params.esrgan_path.empty()) {
+        upscaler_ctx = new_upscaler_ctx(
+            ctx_params.esrgan_path.c_str(),
+            ctx_params.offload_params_to_cpu,
+            ctx_params.diffusion_conv_direct,
+            ctx_params.n_threads,
+            128);
+        if (upscaler_ctx == nullptr) {
+            LOG_ERROR("new_upscaler_ctx failed");
+            return 1;
+        }
+        LOG_INFO("ESRGAN upscaler loaded successfully");
+    }
 
-    if (sd_ctx == nullptr) {
-        LOG_ERROR("new_sd_ctx_t failed");
+    // Create diffusion context only if a diffusion model is provided
+    sd_ctx_t* sd_ctx = nullptr;
+    if (!ctx_params.model_path.empty()) {
+        sd_ctx_params_t sd_ctx_params = ctx_params.to_sd_ctx_params_t(false, false, false);
+        sd_ctx                        = new_sd_ctx(&sd_ctx_params);
+        if (sd_ctx == nullptr) {
+            LOG_ERROR("new_sd_ctx_t failed");
+            return 1;
+        }
+    }
+
+    if (sd_ctx == nullptr && upscaler_ctx == nullptr) {
+        LOG_ERROR("No model loaded. Provide -m for diffusion or --upscale-model for upscaling.");
         return 1;
     }
 
@@ -389,9 +416,15 @@ int main(int argc, const char** argv) {
         res.set_content(r.dump(), "application/json");
     });
 
-    // core endpoint: /v1/images/generations
+    // core endpoint: /v1/images/generations (requires sd_ctx)
     svr.Post("/v1/images/generations", [&](const httplib::Request& req, httplib::Response& res) {
         try {
+            if (sd_ctx == nullptr) {
+                res.status = 400;
+                res.set_content("{\"error\":\"no diffusion model loaded (server started in upscale-only mode)\"}", "application/json");
+                return;
+            }
+
             if (req.body.empty()) {
                 res.status = 400;
                 res.set_content(R"({"error":"empty body"})", "application/json");
@@ -547,8 +580,110 @@ int main(int argc, const char** argv) {
         }
     });
 
+    // upscale endpoint: /v1/images/upscale (requires upscaler_ctx)
+    svr.Post("/v1/images/upscale", [&](const httplib::Request& req, httplib::Response& res) {
+        try {
+            if (upscaler_ctx == nullptr) {
+                res.status = 400;
+                res.set_content("{\"error\":\"no upscale model loaded (use --upscale-model)\"}", "application/json");
+                return;
+            }
+
+            if (req.body.empty()) {
+                res.status = 400;
+                res.set_content(R"({"error":"empty body"})", "application/json");
+                return;
+            }
+
+            json j = json::parse(req.body);
+
+            std::string image_b64 = j.value("image", "");
+            if (image_b64.empty()) {
+                res.status = 400;
+                res.set_content("{\"error\":\"image field required (base64 encoded)\"}", "application/json");
+                return;
+            }
+
+            // Strip data URI prefix if present ("data:image/png;base64,")
+            auto comma_pos = image_b64.find(',');
+            if (comma_pos != std::string::npos) {
+                image_b64 = image_b64.substr(comma_pos + 1);
+            }
+
+            std::vector<uint8_t> img_data = base64_decode(image_b64);
+            if (img_data.empty()) {
+                res.status = 400;
+                res.set_content(R"({"error":"failed to decode base64 image"})", "application/json");
+                return;
+            }
+
+            int img_w, img_h;
+            uint8_t* raw_pixels = load_image_from_memory(
+                reinterpret_cast<const char*>(img_data.data()),
+                static_cast<int>(img_data.size()),
+                img_w, img_h, 0, 0, 3);
+
+            if (!raw_pixels) {
+                res.status = 400;
+                res.set_content(R"({"error":"failed to load image from decoded data"})", "application/json");
+                return;
+            }
+
+            sd_image_t input_image = {(uint32_t)img_w, (uint32_t)img_h, 3, raw_pixels};
+
+            sd_image_t result;
+            {
+                std::lock_guard<std::mutex> lock(sd_ctx_mutex);
+                result = upscale(upscaler_ctx, input_image, 4);
+            }
+
+            stbi_image_free(raw_pixels);
+
+            if (result.data == nullptr) {
+                res.status = 500;
+                res.set_content(R"({"error":"upscale failed"})", "application/json");
+                return;
+            }
+
+            auto image_bytes = write_image_to_vector(
+                ImageFormat::PNG, result.data, result.width, result.height, result.channel);
+            free(result.data);
+
+            if (image_bytes.empty()) {
+                res.status = 500;
+                res.set_content(R"({"error":"failed to encode upscaled image"})", "application/json");
+                return;
+            }
+
+            std::string b64 = base64_encode(image_bytes);
+
+            json out;
+            out["created"] = static_cast<long long>(std::time(nullptr));
+            out["data"]    = json::array();
+            json item;
+            item["b64_json"] = b64;
+            out["data"].push_back(item);
+
+            res.set_content(out.dump(), "application/json");
+            res.status = 200;
+
+        } catch (const std::exception& e) {
+            res.status = 500;
+            json err;
+            err["error"]   = "server_error";
+            err["message"] = e.what();
+            res.set_content(err.dump(), "application/json");
+        }
+    });
+
     svr.Post("/v1/images/edits", [&](const httplib::Request& req, httplib::Response& res) {
         try {
+            if (sd_ctx == nullptr) {
+                res.status = 400;
+                res.set_content("{\"error\":\"no diffusion model loaded (server started in upscale-only mode)\"}", "application/json");
+                return;
+            }
+
             if (!req.is_multipart_form_data()) {
                 res.status = 400;
                 res.set_content(R"({"error":"Content-Type must be multipart/form-data"})", "application/json");
@@ -799,6 +934,12 @@ int main(int argc, const char** argv) {
 
     auto sdapi_any2img = [&](const httplib::Request& req, httplib::Response& res, bool img2img) {
         try {
+            if (sd_ctx == nullptr) {
+                res.status = 400;
+                res.set_content("{\"error\":\"no diffusion model loaded (server started in upscale-only mode)\"}", "application/json");
+                return;
+            }
+
             if (req.body.empty()) {
                 res.status = 400;
                 res.set_content(R"({"error":"empty body"})", "application/json");
@@ -1199,6 +1340,11 @@ int main(int argc, const char** argv) {
     svr.listen(svr_params.listen_ip, svr_params.listen_port);
 
     // cleanup
-    free_sd_ctx(sd_ctx);
+    if (sd_ctx) {
+        free_sd_ctx(sd_ctx);
+    }
+    if (upscaler_ctx) {
+        free_upscaler_ctx(upscaler_ctx);
+    }
     return 0;
 }
