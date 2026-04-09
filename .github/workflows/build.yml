@@ -18,6 +18,190 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ubuntu-latest-cmake:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Dependencies
+        id: depends
+        run: |
+          sudo apt-get update
+          sudo apt-get install build-essential
+
+      - name: Build
+        id: cmake_build
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DGGML_AVX2=ON -DSD_BUILD_SHARED_LIBS=ON
+          cmake --build . --config Release
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Fetch system info
+        id: system-info
+        run: |
+          echo "CPU_ARCH=`uname -m`" >> "$GITHUB_OUTPUT"
+          echo "OS_NAME=`lsb_release -s -i`" >> "$GITHUB_OUTPUT"
+          echo "OS_VERSION=`lsb_release -s -r`" >> "$GITHUB_OUTPUT"
+          echo "OS_TYPE=`uname -s`" >> "$GITHUB_OUTPUT"
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
+          path: |
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
+
+  windows-latest-cmake:
+    runs-on: windows-2022
+
+    env:
+      VULKAN_VERSION: 1.4.328.1
+
+    strategy:
+      matrix:
+        include:
+          - build: "avx2"
+            defines: "-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DSD_BUILD_SHARED_LIBS=ON"
+    steps:
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - name: Install cuda-toolkit
+        id: cuda-toolkit
+        if: ${{ matrix.build == 'cuda12' }}
+        uses: Jimver/cuda-toolkit@v0.2.22
+        with:
+          cuda: "12.8.1"
+          method: "network"
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
+      - name: Install Vulkan SDK
+        id: get_vulkan
+        if: ${{ matrix.build == 'vulkan' }}
+        run: |
+          curl.exe -o $env:RUNNER_TEMP/VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+
+      - name: Activate MSVC environment
+        id: msvc_dev_cmd
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        id: cmake_build
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_CXX_FLAGS='/bigobj' -G Ninja -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe -DCMAKE_BUILD_TYPE=Release ${{ matrix.defines }}
+          cmake --build .
+
+      - name: Check AVX512F support
+        id: check_avx512f
+        if: ${{ matrix.build == 'avx512' }}
+        continue-on-error: true
+        run: |
+          cd build
+          $vcdir = $(vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          $msvc = $(join-path $vcdir $('VC\Tools\MSVC\'+$(gc -raw $(join-path $vcdir 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt')).Trim()))
+          $cl =  $(join-path $msvc 'bin\Hostx64\x64\cl.exe')
+          echo 'int main(void){unsigned int a[4];__cpuid(a,7);return !(a[1]&65536);}' >> avx512f.c
+          & $cl /O2 /GS- /kernel avx512f.c /link /nodefaultlib /entry:main
+          .\avx512f.exe && echo "AVX512F: YES" && ( echo HAS_AVX512F=1 >> $env:GITHUB_ENV ) || echo "AVX512F: NO"
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        run: |
+          $filePath = ".\build\bin\Release\*"
+          if (Test-Path $filePath) {
+            echo "Exists at path $filePath"
+            Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
+            Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
+          } elseif (Test-Path ".\build\bin\stable-diffusion.dll") {
+          $filePath = ".\build\bin\*"
+            echo "Exists at path $filePath"
+            Copy-Item ggml/LICENSE .\build\bin\ggml.txt
+            Copy-Item LICENSE .\build\bin\stable-diffusion.cpp.txt
+          } else {
+            ls .\build\bin
+            throw "Can't find stable-diffusion.dll"
+          }
+          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-${{ matrix.build }}-x64.zip $filePath
+
+      - name: Copy and pack Cuda runtime
+        id: pack_cuda_runtime
+        if: ${{ matrix.build == 'cuda12' && (github.event_name == 'push' && github.ref == 'refs/heads/master' || github.event.inputs.create_release == 'true') }}
+        run: |
+          echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
+          $dst='.\build\bin\cudart\'
+          robocopy "${{steps.cuda-toolkit.outputs.CUDA_PATH}}\bin" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll
+          7z a cudart-sd-bin-win-cu12-x64.zip $dst\*
+
+      - name: Upload Cuda runtime
+        if: ${{ matrix.build == 'cuda12' && (github.event_name == 'push' && github.ref == 'refs/heads/master' || github.event.inputs.create_release == 'true') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-cudart-sd-bin-win-cu12-x64.zip
+          path: |
+            cudart-sd-bin-win-cu12-x64.zip
+
+      - name: Upload artifacts
+        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-${{ matrix.build }}-x64.zip
+          path: |
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-${{ matrix.build }}-x64.zip
+
   windows-latest-rocm:
     runs-on: windows-2022
 
@@ -373,8 +557,10 @@ jobs:
 
     needs:
       - ubuntu-latest-rocm
+      - ubuntu-latest-cmake
       - windows-latest-cmake-hip
       - windows-latest-rocm
+      - windows-latest-cmake
 
     steps:
       - name: Clone
