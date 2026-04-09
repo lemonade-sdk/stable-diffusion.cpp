@@ -23,10 +23,11 @@ jobs:
 
     steps:
       - name: Clone
-        id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -94,10 +95,11 @@ jobs:
             defines: "-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DSD_BUILD_SHARED_LIBS=ON"
     steps:
       - name: Clone
-        id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
 
       - name: Setup Node
         uses: actions/setup-node@v4
