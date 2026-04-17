@@ -280,7 +280,7 @@ jobs:
       - name: Pack artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
-          cp "C:\TheRock\build\bin\amdhip64_7.dll" ".\build\bin\"
+          cp "${env:HIP_PATH}\bin\amdhip64_7.dll" ".\build\bin\"
           7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ env.ROCM_VERSION }}-x64.zip .\build\bin\*
 
       - name: Upload artifacts
