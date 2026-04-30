@@ -606,15 +606,15 @@ jobs:
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64${{ matrix.archive_suffix }}.zip ./build/bin/*
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip ./build/bin/*
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64${{ matrix.archive_suffix }}.zip
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
           path: |
-            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64${{ matrix.archive_suffix }}.zip
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
 
   release:
     if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
