@@ -13,6 +13,9 @@ on:
 env:
   BRANCH_NAME: master
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
   cancel-in-progress: true
@@ -549,6 +552,70 @@ jobs:
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip
 
+  macos-arm64-cmake:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macos-14
+            archive_suffix: ""
+          - os: macos-latest
+            label: macos-latest
+            archive_suffix: "-latest"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.21
+        with:
+          key: macos-arm64-${{ matrix.label }}
+          evict-old-files: 1d
+
+      - name: Build
+        id: cmake_build
+        run: |
+          sysctl -a
+          mkdir build
+          cd build
+          cmake .. \
+            -DGGML_METAL=ON \
+            -DGGML_METAL_USE_BF16=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON \
+            -DSD_BUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_RPATH='@loader_path' \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
+          path: |
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
+
   release:
     if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
 
@@ -560,6 +627,7 @@ jobs:
       - windows-latest-cmake-hip
       - windows-latest-rocm
       - windows-latest-cmake
+      - macos-arm64-cmake
 
     steps:
       - name: Clone
