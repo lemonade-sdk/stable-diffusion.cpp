@@ -53,7 +53,17 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DGGML_AVX2=ON -DSD_BUILD_SHARED_LIBS=ON
+          # Disable -march=native and pin CPU instruction set to AVX2+FMA+F16C so
+          # the released x86_64 binary runs on hosts without AVX-512.
+          # Without GGML_NATIVE=OFF, ggml's CMake auto-enables every extension
+          # the build runner's CPU has (including AVX-512 on Azure Xeon
+          # Platinum 8370C runners), which then SIGILLs on AVX-512-less hosts.
+          cmake .. \
+            -DGGML_NATIVE=OFF \
+            -DGGML_AVX2=ON \
+            -DGGML_FMA=ON \
+            -DGGML_F16C=ON \
+            -DSD_BUILD_SHARED_LIBS=ON
           cmake --build . --config Release
 
       - name: Get commit hash
@@ -503,10 +513,16 @@ jobs:
         run: |
           mkdir build
           cd build
+          # Same portability concern as ubuntu-latest-cmake: pin the host CPU
+          # instruction set so the binary runs on AVX-512-less ROCm hosts too.
           cmake .. -G Ninja \
             -DCMAKE_HIP_COMPILER="$(hipconfig -l)/clang" \
             -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_NATIVE=OFF \
+            -DGGML_AVX2=ON \
+            -DGGML_FMA=ON \
+            -DGGML_F16C=ON \
             -DSD_HIPBLAS=ON \
             -DHIP_PLATFORM=amd \
             -DGPU_TARGETS="${{ matrix.gpu_targets }}" \
