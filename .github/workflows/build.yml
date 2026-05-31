@@ -181,14 +181,14 @@ jobs:
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          tar -cJf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz -C ./build/bin .
+          zip -y -r sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-Ubuntu-22.04-x86_64-cuda-${{ matrix.sm }}.zip ./build/bin
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
-          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-Ubuntu-22.04-x86_64-cuda-${{ matrix.sm }}.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-Ubuntu-22.04-x86_64-cuda-${{ matrix.sm }}.zip
 
   windows-latest-cuda:
     runs-on: windows-2022
@@ -254,14 +254,14 @@ jobs:
         run: |
           Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
           Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
-          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
+          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
-          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-cuda-${{ matrix.sm }}-x64.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-cuda-${{ matrix.sm }}-x64.zip
 
   windows-latest-cmake:
     runs-on: windows-2022
@@ -881,7 +881,7 @@ jobs:
             const fs = require('fs');
             const release_id = '${{ steps.create_release.outputs.id }}';
             for (let file of await fs.readdirSync('./artifact')) {
-              if (path.extname(file) === '.zip' || file.endsWith('.tar.xz')) {
+              if (path.extname(file) === '.zip') {
                 console.log('uploadReleaseAsset', file);
                 await github.repos.uploadReleaseAsset({
                   owner: context.repo.owner,
