@@ -9,6 +9,12 @@ on:
         description: "Create new release"
         required: true
         type: boolean
+  pull_request: # validate the release build on PRs; the release job is skipped so nothing is published
+    paths:
+      # The build jobs clone stable-diffusion.cpp source from upstream
+      # (leejet/stable-diffusion.cpp), so only changes to this workflow itself
+      # can affect the outcome of a PR run. Scope PR runs to it.
+      - '.github/workflows/build.yml'
 
 env:
   BRANCH_NAME: master
@@ -101,14 +107,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - sm: sm_75
-          - sm: sm_80
-          - sm: sm_86
-          - sm: sm_89
-          - sm: sm_90
-          - sm: sm_100
-          - sm: sm_120
+        # On PRs only build one representative arch (packaging logic is identical
+        # across all sm_*); build the full matrix on schedule/dispatch.
+        sm: ${{ github.event_name == 'pull_request' && fromJSON('["sm_89"]') || fromJSON('["sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120"]') }}
 
     steps:
       - name: Clone
@@ -202,14 +203,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - sm: sm_75
-          - sm: sm_80
-          - sm: sm_86
-          - sm: sm_89
-          - sm: sm_90
-          - sm: sm_100
-          - sm: sm_120
+        # On PRs only build one representative arch (packaging logic is identical
+        # across all sm_*); build the full matrix on schedule/dispatch.
+        sm: ${{ github.event_name == 'pull_request' && fromJSON('["sm_89"]') || fromJSON('["sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120"]') }}
 
     steps:
       - name: Clone
