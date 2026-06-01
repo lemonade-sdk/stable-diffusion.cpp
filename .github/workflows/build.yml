@@ -263,12 +263,17 @@ jobs:
           Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
           Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
           $cudaBin = Join-Path $env:CUDA_PATH 'bin'
-          $runtimeDllPatterns = @('cudart64_*.dll', 'cublas64_*.dll', 'cublasLt64_*.dll', 'curand64_*.dll', 'nvJitLink_*.dll')
+          $runtimeDllPatterns = @(
+            'cudart64_*.dll',
+            'cublas64_*.dll',
+            'cublasLt64_*.dll',
+            'curand64_*.dll',
+            'nvJitLink_*.dll'
+          )
           foreach ($pattern in $runtimeDllPatterns) {
             $dll = Get-ChildItem -Path $cudaBin -Filter $pattern -ErrorAction Stop | Sort-Object Name -Descending | Select-Object -First 1
             if (-not $dll) { throw "Required CUDA runtime DLL matching '$pattern' was not found in $cudaBin" }
-            Copy-Item $dll.FullName .\build\bin\Release\
-          }
+            Copy-Item $dll.FullName .\build\bin\Release
           }
           7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
 
