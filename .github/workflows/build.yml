@@ -160,15 +160,19 @@ jobs:
       - name: Bundle CUDA runtime libraries
         run: |
           cuda_lib=/usr/local/cuda/lib64
-          cp -v ${cuda_lib}/libcudart.so*   build/bin/ 2>/dev/null || true
-          cp -v ${cuda_lib}/libcublas.so*   build/bin/ 2>/dev/null || true
-          cp -v ${cuda_lib}/libcublasLt.so* build/bin/ 2>/dev/null || true
-          cp -v ${cuda_lib}/libcurand.so*   build/bin/ 2>/dev/null || true
+          cp -av ${cuda_lib}/libcudart.so*    build/bin/
+          cp -av ${cuda_lib}/libcublas.so*    build/bin/
+          cp -av ${cuda_lib}/libcublasLt.so*  build/bin/
+          cp -av ${cuda_lib}/libcurand.so*    build/bin/
+          cp -av ${cuda_lib}/libnvJitLink.so* build/bin/
 
       - name: Set RPATH for portable distribution
         run: |
-          for f in build/bin/*.so* build/bin/sd; do
-            [ -f "$f" ] && ! [ -L "$f" ] && patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
+          for f in build/bin/*; do
+            [ -f "$f" ] && ! [ -L "$f" ] || continue
+            if file "$f" | grep -q 'ELF'; then
+              patchelf --set-rpath '$ORIGIN' "$f"
+            fi
           done
 
       - name: Get commit hash
@@ -220,7 +224,7 @@ jobs:
         with:
           cuda: '12.8.0'
           method: 'network'
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "nvjitlink", "thrust", "visual_studio_integration"]'
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -256,7 +260,12 @@ jobs:
         run: |
           Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
           Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
-          robocopy "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}\bin" .\build\bin\Release cudart64_*.dll cublas64_*.dll cublasLt64_*.dll; if ($LASTEXITCODE -le 7) { $LASTEXITCODE = 0 }
+          $cudaBin = Join-Path $env:CUDA_PATH 'bin'
+          $runtimeDllPatterns = @('cudart64_*.dll', 'cublas64_*.dll', 'cublasLt64_*.dll', 'curand64_*.dll', 'nvJitLink_*.dll')
+          foreach ($pattern in $runtimeDllPatterns) {
+            $dll = Get-ChildItem -Path $cudaBin -Filter $pattern | Sort-Object Name -Descending | Select-Object -First 1
+            if ($dll) { Copy-Item $dll.FullName .\build\bin\Release\ }
+          }
           7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
 
       - name: Upload artifacts
