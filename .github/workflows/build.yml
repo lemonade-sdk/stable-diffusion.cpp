@@ -160,6 +160,7 @@ jobs:
       - name: Bundle CUDA runtime libraries
         run: |
           cuda_lib=/usr/local/cuda/lib64
+          cp -v ${cuda_lib}/libcudart.so*   build/bin/ 2>/dev/null || true
           cp -v ${cuda_lib}/libcublas.so*   build/bin/ 2>/dev/null || true
           cp -v ${cuda_lib}/libcublasLt.so* build/bin/ 2>/dev/null || true
           cp -v ${cuda_lib}/libcurand.so*   build/bin/ 2>/dev/null || true
@@ -214,6 +215,7 @@ jobs:
           repository: 'leejet/stable-diffusion.cpp'
 
       - name: Install CUDA Toolkit
+        id: cuda-toolkit
         uses: Jimver/cuda-toolkit@v0.2.22
         with:
           cuda: '12.8.0'
@@ -254,6 +256,7 @@ jobs:
         run: |
           Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
           Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
+          robocopy "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}\bin" .\build\bin\Release cudart64_*.dll cublas64_*.dll cublasLt64_*.dll; if ($LASTEXITCODE -le 7) { $LASTEXITCODE = 0 }
           7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
 
       - name: Upload artifacts
