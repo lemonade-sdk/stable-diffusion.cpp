@@ -95,6 +95,195 @@ jobs:
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
+  ubuntu-latest-cuda:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sm: sm_75
+          - sm: sm_80
+          - sm: sm_86
+          - sm: sm_89
+          - sm: sm_90
+          - sm: sm_100
+          - sm: sm_120
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+          ref: master
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
+        with:
+          key: ubuntu-cuda-${{ matrix.sm }}
+          evict-old-files: 1d
+
+      - name: Free disk space
+        run: |
+          sudo apt-get remove -y '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' 'ruby.*' \
+            google-cloud-cli azure-cli google-chrome-stable firefox powershell 2>/dev/null || true
+          sudo apt-get autoremove -y
+          df -h
+
+      - name: Install CUDA Toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y cuda-toolkit-12-8 cmake ninja-build patchelf
+
+      - name: Set CUDA environment
+        run: |
+          echo "CUDA_PATH=/usr/local/cuda" >> "$GITHUB_ENV"
+          echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Build
+        id: cmake_build
+        run: |
+          cmake_arch="${{ matrix.sm }}"
+          cmake_arch="${cmake_arch#sm_}"
+          cmake -B build -S . \
+            -DSD_CUBLAS=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="${cmake_arch}" \
+            -DGGML_NATIVE=OFF \
+            -DSD_BUILD_SHARED_LIBS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j $(nproc)
+
+      - name: Bundle CUDA runtime libraries
+        run: |
+          cuda_lib=/usr/local/cuda/lib64
+          cp -av ${cuda_lib}/libcudart.so*    build/bin/
+          cp -av ${cuda_lib}/libcublas.so*    build/bin/
+          cp -av ${cuda_lib}/libcublasLt.so*  build/bin/
+          cp -av ${cuda_lib}/libcurand.so*    build/bin/
+          cp -av ${cuda_lib}/libnvJitLink.so* build/bin/
+
+      - name: Set RPATH for portable distribution
+        run: |
+          for f in build/bin/*; do
+            [ -f "$f" ] && ! [ -L "$f" ] || continue
+            if file "$f" | grep -q 'ELF'; then
+              patchelf --set-rpath '$ORIGIN' "$f"
+            fi
+          done
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          tar -cJf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz -C ./build/bin .
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
+
+  windows-latest-cuda:
+    runs-on: windows-2022
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sm: sm_75
+          - sm: sm_80
+          - sm: sm_86
+          - sm: sm_89
+          - sm: sm_90
+          - sm: sm_100
+          - sm: sm_120
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+          ref: master
+
+      - name: Install CUDA Toolkit
+        id: cuda-toolkit
+        uses: Jimver/cuda-toolkit@v0.2.22
+        with:
+          cuda: '12.8.0'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "nvjitlink", "thrust", "visual_studio_integration"]'
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
+        with:
+          key: windows-cuda-${{ matrix.sm }}
+          variant: ccache
+          evict-old-files: 1d
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set sm=${{ matrix.sm }}
+          set cmake_arch=%sm:sm_=%
+          cmake -S . -B build -G "Ninja Multi-Config" ^
+            -DSD_CUBLAS=ON ^
+            -DCMAKE_CUDA_ARCHITECTURES=%cmake_arch% ^
+            -DGGML_NATIVE=OFF ^
+            -DSD_BUILD_SHARED_LIBS=ON
+          cmake --build build --config Release
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
+          Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
+          $cudaBin = Join-Path $env:CUDA_PATH 'bin'
+          $runtimeDllPatterns = @(
+            'cudart64_*.dll',
+            'cublas64_*.dll',
+            'cublasLt64_*.dll',
+            'curand64_*.dll',
+            'nvJitLink_*.dll'
+          )
+          foreach ($pattern in $runtimeDllPatterns) {
+            $dll = Get-ChildItem -Path $cudaBin -Filter $pattern -ErrorAction Stop | Sort-Object Name -Descending | Select-Object -First 1
+            if (-not $dll) { throw "Required CUDA runtime DLL matching '$pattern' was not found in $cudaBin" }
+            Copy-Item $dll.FullName .\build\bin\Release
+          }
+          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
+
   windows-latest-cmake:
     runs-on: windows-2022
 
@@ -640,9 +829,11 @@ jobs:
     needs:
       - ubuntu-latest-rocm
       - ubuntu-latest-cmake
+      - ubuntu-latest-cuda
       - windows-latest-cmake-hip
       - windows-latest-rocm
       - windows-latest-cmake
+      - windows-latest-cuda
       - macos-arm64-cmake
 
     steps:
@@ -711,7 +902,7 @@ jobs:
             const fs = require('fs');
             const release_id = '${{ steps.create_release.outputs.id }}';
             for (let file of await fs.readdirSync('./artifact')) {
-              if (path.extname(file) === '.zip') {
+              if (path.extname(file) === '.zip' || file.endsWith('.tar.xz')) {
                 console.log('uploadReleaseAsset', file);
                 await github.repos.uploadReleaseAsset({
                   owner: context.repo.owner,
