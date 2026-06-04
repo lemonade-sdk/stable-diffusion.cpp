@@ -167,6 +167,9 @@ jobs:
           cp -av ${cuda_lib}/libcublasLt.so*  build/bin/
           cp -av ${cuda_lib}/libcurand.so*    build/bin/
           cp -av ${cuda_lib}/libnvJitLink.so* build/bin/
+          # ggml-cuda is a build artifact (backend plugin); copy it into bin/ if
+          # cmake placed it outside build/bin/ (e.g. build/ggml/src/)
+          find build -name 'libggml-cuda.so*' ! -path 'build/bin/*' -exec cp -av {} build/bin/ \;
 
       - name: Set RPATH for portable distribution
         run: |
@@ -271,6 +274,12 @@ jobs:
             if (-not $dll) { throw "Required CUDA runtime DLL matching '$pattern' was not found in $cudaBin" }
             Copy-Item $dll.FullName .\build\bin\Release
           }
+          # ggml-cuda.dll is a build artifact (backend plugin); copy into Release/
+          # if cmake placed it outside build\bin\Release\ (e.g. build\ggml\src\Release\)
+          $ggmlCuda = Get-ChildItem -Path build -Filter 'ggml-cuda.dll' -Recurse |
+            Where-Object { $_.FullName -notlike '*\bin\Release\*' } |
+            Select-Object -First 1
+          if ($ggmlCuda) { Copy-Item $ggmlCuda.FullName .\build\bin\Release\ }
           7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
 
       - name: Upload artifacts
