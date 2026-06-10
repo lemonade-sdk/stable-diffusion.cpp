@@ -247,6 +247,7 @@ jobs:
           set cmake_arch=%sm:sm_=%
           cmake -S . -B build -G "Ninja Multi-Config" ^
             -DSD_CUBLAS=ON ^
+            -DGGML_CUDA=ON ^
             -DCMAKE_CUDA_ARCHITECTURES=%cmake_arch% ^
             -DGGML_NATIVE=OFF ^
             -DSD_BUILD_SHARED_LIBS=ON
