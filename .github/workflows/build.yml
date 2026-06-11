@@ -223,9 +223,9 @@ jobs:
 
       - name: Install CUDA Toolkit
         id: cuda-toolkit
-        uses: Jimver/cuda-toolkit@v0.2.22
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: '12.9.0'
+          cuda: '12.9.1'
           method: 'network'
           sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "nvjitlink", "thrust", "visual_studio_integration"]'
 
