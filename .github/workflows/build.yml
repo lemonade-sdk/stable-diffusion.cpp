@@ -299,7 +299,7 @@ jobs:
       fail-fast: false
       matrix:
         # sm_121 targets the GB10 (Blackwell) ARM64 device
-        sm: ${{ github.event_name == 'pull_request' && fromJSON('["sm_121"]') || fromJSON('["sm_121"]') }}
+        sm: ["sm_121"]
 
     steps:
       - name: Clone
