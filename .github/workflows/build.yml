@@ -55,10 +55,11 @@ jobs:
           cd build
           # Build a fat package: one libstable-diffusion.so plus a libggml-cpu-*.so
           # per CPU variant (sandybridge, haswell, skylakex, icelake, alderlake,
+          # per CPU variant (sandybridge, haswell, skylakex, icelake, alderlake,
           # x64). At runtime ggml dlopens whichever variant is highest-priority on
-          # the host CPU, so an AVX-512 host gets AVX-512 perf and an AVX-512-less
-          # host falls back to haswell — same zip, no -march=native runner
-          # lottery, no SIGILL.
+          # the host CPU (alderlake → icelake → skylakex → haswell → sandybridge → x64),
+          # so the same zip runs on AVX-512 hosts and older non-AVX2 hosts alike —
+          # no -march=native runner lottery, no SIGILL.
           cmake .. \
             -DGGML_NATIVE=OFF \
             -DGGML_BACKEND_DL=ON \
