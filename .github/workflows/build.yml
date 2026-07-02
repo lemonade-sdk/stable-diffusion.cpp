@@ -127,7 +127,7 @@ jobs:
       - name: Build (Alpine / musl)
         run: |
           docker run --rm -v "$PWD:/src" -w /src alpine:latest sh -euxc '
-            apk add --no-cache build-base cmake git zip
+            apk add --no-cache build-base cmake git zip patchelf file
             cmake -B build -S . \
               -DGGML_NATIVE=OFF \
               ${{ matrix.cpu_flags }} \
@@ -136,6 +136,20 @@ jobs:
               -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
               -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++"
             cmake --build build --config Release -j"$(nproc)"
+
+            # ggml shared libs land outside build/bin; collect them next to the
+            # binaries so the flattened archive is self-contained.
+            find build -name "libggml*.so*" ! -path "build/bin/*" -exec cp -av {} build/bin/ \;
+
+            # The build tree bakes an absolute rpath; rewrite to $ORIGIN so the
+            # relocated musl binaries find their sibling .so files at runtime.
+            for f in build/bin/*; do
+              [ -f "$f" ] && ! [ -L "$f" ] || continue
+              if file "$f" | grep -q ELF; then
+                patchelf --set-rpath "\$ORIGIN" "$f"
+              fi
+            done
+
             chmod -R a+rwX build
           '
 
