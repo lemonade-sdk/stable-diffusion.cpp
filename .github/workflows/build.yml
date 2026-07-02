@@ -971,48 +971,211 @@ jobs:
           TAG_NAME="${{ env.BRANCH_NAME }}-${{ steps.commit_count.outputs.count }}-${{ steps.commit.outputs.short }}"
           echo "name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Check if tag exists
-        id: check_tag
+      - name: Check release artifacts
+        id: check_artifacts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ env.BRANCH_NAME }}
+          SHORT: ${{ steps.commit.outputs.short }}
         run: |
-          TAG_NAME="${{ steps.tag_name.outputs.name }}"
-          if git ls-remote --tags https://github.com/${{ github.repository }}.git | grep -q "refs/tags/${TAG_NAME}$"; then
-            echo "Tag ${TAG_NAME} already exists in ${{ github.repository }}. Skipping release creation."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Tag ${TAG_NAME} does not exist in ${{ github.repository }}. Proceeding with release."
-            echo "exists=false" >> $GITHUB_OUTPUT
+          total_missing=0
+          summary=""
+
+          check_family() {
+            local family="$1"; shift
+            local patterns=("$@")
+            local missing=0
+            for pattern in "${patterns[@]}"; do
+              if ! ls $pattern >/dev/null 2>&1; then
+                echo "::error::[$family] Missing artifact: $pattern"
+                missing=$((missing + 1))
+              fi
+            done
+            if [ "$missing" -gt 0 ]; then
+              echo "::warning::$family family is incomplete ($missing artifact(s) missing) — dropping all $family artifacts from this release."
+              for pattern in "${patterns[@]}"; do
+                rm -fv $pattern 2>/dev/null || true
+              done
+              total_missing=$((total_missing + missing))
+              summary="${summary}${summary:+, }${family}: $missing missing, family dropped"
+            fi
+          }
+
+          # Each backend family must be published as a complete, internally
+          # consistent set across every platform/variant/SDK it covers — never
+          # a partial mix. A gap in one family drops that whole family from
+          # the release; other families are unaffected.
+
+          # CUDA: 8 sm_* variants on ubuntu x64 and windows x64; only sm_121
+          # (GB10) is built for ubuntu arm64.
+          cuda_patterns=()
+          for sm in sm_75 sm_80 sm_86 sm_89 sm_90 sm_100 sm_120 sm_121; do
+            cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-${sm}-x64.tar.xz")
+            cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-windows-cuda-${sm}-x64.zip")
+          done
+          cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-sm_121-arm64.tar.xz")
+          check_family cuda "${cuda_patterns[@]}"
+
+          # TheRock nightly ROCm 7.13.0 (windows-latest-rocm + the 7.13.0 leg
+          # of ubuntu-latest-rocm). Kept separate from the HIP SDK line below
+          # since they're different SDKs, not just different platforms.
+          check_family rocm-therock \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-win-rocm-7.13.0-x64.zip" \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-Ubuntu-24.04-x86_64-rocm-7.13.0.zip"
+
+          # Official/legacy HIP SDK ROCm (windows-latest-cmake-hip 7.1.1 +
+          # the 7.2.1 leg of ubuntu-latest-rocm).
+          check_family rocm-hipsdk \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-win-rocm-7.1.1-x64.zip" \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-Ubuntu-24.04-x86_64-rocm-7.2.1.zip"
+
+          # CPU: ubuntu-latest-cmake's filename embeds the runner's OS name/
+          # version via lsb_release, so it's wildcarded rather than pinned.
+          check_family cpu \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64.zip" \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-win-avx2-x64.zip"
+
+          check_family metal \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-arm64-metal.zip" \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-arm64-metal-latest.zip"
+
+          echo "missing=$total_missing" >> "$GITHUB_OUTPUT"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+          files=$(find ./artifact -maxdepth 1 \( -name '*.zip' -o -name '*.tar.xz' \) 2>/dev/null | wc -l)
+
+          # Never create or update a release with nothing to publish.
+          if [ "$files" -eq 0 ]; then
+            echo "::error::No release artifacts found in ./artifact — aborting before creating a release."
+            exit 1
           fi
 
-      - name: Create release
-        id: create_release
-        if: steps.check_tag.outputs.exists == 'false'
-        uses: anzz1/action-create-release@v1
+          if [ "$total_missing" -gt 0 ]; then
+            echo "$total_missing artifact(s) missing ($summary) — continuing to publish the $files artifact(s) from complete families. The job will still fail below so the gap gets noticed."
+          else
+            echo "All expected artifacts present. Found $files artifact(s) ready to upload."
+          fi
+
+      - name: Determine release summary
+        id: release_summary
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "value=Nightly release for ${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Get the release for this tag, creating it if it does not exist yet.
+      # This is idempotent: if a previous run created the release but failed
+      # partway through uploading (e.g. a transient GitHub outage), re-running
+      # reuses the existing release so the upload step below can fill the gaps.
+      - name: Create or get release
+        id: release
+        uses: actions/github-script@v8
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ steps.tag_name.outputs.name }}
+          RELEASE_SUMMARY: ${{ steps.release_summary.outputs.value }}
         with:
-          tag_name: ${{ steps.tag_name.outputs.name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = process.env.TAG_NAME;
+            const { owner, repo } = context.repo;
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              core.info(`Reusing existing release ${tag} (id ${release.id})`);
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              try {
+                release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, body: process.env.RELEASE_SUMMARY })).data;
+                core.info(`Created release ${tag} (id ${release.id})`);
+              } catch (createError) {
+                if (createError.status !== 422) throw createError;
+                release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+                core.info(`Reusing concurrently created release ${tag} (id ${release.id})`);
+              }
+            }
+            core.setOutput('id', release.id);
 
       - name: Upload release
         id: upload_release
-        if: steps.check_tag.outputs.exists == 'false'
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.id }}
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            const path = require('path');
             const fs = require('fs');
-            const release_id = '${{ steps.create_release.outputs.id }}';
-            for (let file of await fs.readdirSync('./artifact')) {
-              if (path.extname(file) === '.zip' || file.endsWith('.tar.xz')) {
-                console.log('uploadReleaseAsset', file);
-                await github.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release_id,
-                  name: file,
-                  data: await fs.readFileSync(`./artifact/${file}`)
-                });
+            const { owner, repo } = context.repo;
+            const release_id = Number(process.env.RELEASE_ID);
+
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+            // Retry transient failures (network errors, 5xx, rate limits) with
+            // exponential backoff so a momentary GitHub blip does not abort the
+            // whole upload and leave the release partially populated.
+            async function withRetry(label, fn, attempts = 5) {
+              for (let i = 1; ; i++) {
+                try {
+                  return await fn();
+                } catch (e) {
+                  const transient = !e.status || e.status >= 500 || e.status === 429;
+                  if (i >= attempts || !transient) throw e;
+                  const delay = Math.min(30000, 1000 * 2 ** (i - 1));
+                  core.warning(`${label} failed (attempt ${i}/${attempts}): ${e.message}. Retrying in ${delay}ms`);
+                  await sleep(delay);
+                }
               }
             }
+
+            // Assets already attached (from an earlier partial run). GitHub only
+            // creates an asset once its upload completes, so anything listed here
+            // is intact and can be skipped — re-runs only fill the gaps.
+            const existing = new Set();
+            for (const a of await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id })) {
+              if (a.state === 'uploaded') {
+                existing.add(a.name);
+              } else {
+                core.warning(`deleting incomplete asset ${a.name} (${a.state})`);
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
+              }
+            }
+
+            const files = fs.readdirSync('./artifact').filter((f) => f.endsWith('.zip') || f.endsWith('.tar.xz'));
+
+            let uploaded = 0;
+            let skipped = 0;
+            for (const file of files) {
+              if (existing.has(file)) {
+                core.info(`skipping ${file} (already uploaded)`);
+                skipped++;
+                continue;
+              }
+              const data = fs.readFileSync(`./artifact/${file}`);
+              await withRetry(`upload ${file}`, () =>
+                github.rest.repos.uploadReleaseAsset({ owner, repo, release_id, name: file, data })
+                  .catch(async (e) => {
+                    if (e.status !== 422) throw e;
+                    const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id });
+                    const asset = assets.find((a) => a.name === file);
+                    if (asset?.state === 'uploaded') {
+                      core.info(`accepting ${file} (already uploaded)`);
+                      return;
+                    }
+                    if (asset) {
+                      core.warning(`deleting conflicting asset ${file} (${asset.state})`);
+                      await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id });
+                      throw new Error(`retrying upload for ${file} after deleting conflicting asset`);
+                    }
+                    throw e;
+                  }));
+              core.info(`uploaded ${file}`);
+              uploaded++;
+            }
+
+            core.info(`Done: ${uploaded} uploaded, ${skipped} already present, ${files.length} total.`);
+
+      - name: Fail if any artifacts were missing
+        if: steps.check_artifacts.outputs.missing != '0'
+        run: |
+          echo "::error::${{ steps.check_artifacts.outputs.missing }} artifact(s) were missing (${{ steps.check_artifacts.outputs.summary }}) — the incomplete families were dropped from this release; other families were still published. See the 'Check release artifacts' step for the full per-file list."
+          exit 1
