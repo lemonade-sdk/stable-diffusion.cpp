@@ -250,7 +250,8 @@ jobs:
             -DGGML_CUDA=ON ^
             -DCMAKE_CUDA_ARCHITECTURES=%cmake_arch% ^
             -DGGML_NATIVE=OFF ^
-            -DSD_BUILD_SHARED_LIBS=ON
+            -DSD_BUILD_SHARED_LIBS=ON ^
+            -DCMAKE_CXX_FLAGS=/bigobj
           cmake --build build --config Release
 
       - name: Get commit hash
