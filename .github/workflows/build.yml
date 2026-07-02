@@ -55,7 +55,6 @@ jobs:
           cd build
           # Build a fat package: one libstable-diffusion.so plus a libggml-cpu-*.so
           # per CPU variant (sandybridge, haswell, skylakex, icelake, alderlake,
-          # per CPU variant (sandybridge, haswell, skylakex, icelake, alderlake,
           # x64). At runtime ggml dlopens whichever variant is highest-priority on
           # the host CPU (alderlake → icelake → skylakex → haswell → sandybridge → x64),
           # so the same zip runs on AVX-512 hosts and older non-AVX2 hosts alike —
