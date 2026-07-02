@@ -1132,20 +1132,27 @@ jobs:
               }
             }
 
-            // Assets already attached (from an earlier partial run). GitHub only
-            // creates an asset once its upload completes, so anything listed here
-            // is intact and can be skipped — re-runs only fill the gaps.
+            const files = fs.readdirSync('./artifact').filter((f) => f.endsWith('.zip') || f.endsWith('.tar.xz'));
+            const wanted = new Set(files);
+
+            // Reconcile existing release assets against what this run decided to
+            // publish: drop anything not fully uploaded (a broken partial upload)
+            // and anything not in the current file set. The latter case matters
+            // because the release is reused across runs against the same tag —
+            // if a family was complete and published in an earlier run but this
+            // run finds it incomplete and drops it locally, its assets from that
+            // earlier run would otherwise linger and make the family look
+            // complete even though this run couldn't reproduce it.
             const existing = new Set();
             for (const a of await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id })) {
-              if (a.state === 'uploaded') {
+              if (a.state === 'uploaded' && wanted.has(a.name)) {
                 existing.add(a.name);
               } else {
-                core.warning(`deleting incomplete asset ${a.name} (${a.state})`);
+                const reason = a.state !== 'uploaded' ? `incomplete (${a.state})` : 'stale (not part of this run)';
+                core.warning(`deleting ${reason} asset ${a.name}`);
                 await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
               }
             }
-
-            const files = fs.readdirSync('./artifact').filter((f) => f.endsWith('.zip') || f.endsWith('.tar.xz'));
 
             let uploaded = 0;
             let skipped = 0;
