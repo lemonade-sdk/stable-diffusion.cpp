@@ -101,6 +101,63 @@ jobs:
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
+  # musl (Alpine) — CPU. Compiled inside an Alpine container so it links musl;
+  # libstdc++/libgcc are static so the archive is self-contained.
+  alpine-musl-cmake:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            cpu_flags: "-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            cpu_flags: ""
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+
+      - name: Build (Alpine / musl)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:latest sh -euxc '
+            apk add --no-cache build-base cmake git zip
+            cmake -B build -S . \
+              -DGGML_NATIVE=OFF \
+              ${{ matrix.cpu_flags }} \
+              -DSD_BUILD_SHARED_LIBS=ON \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+            cmake --build build --config Release -j"$(nproc)"
+            chmod -R a+rwX build
+          '
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip
+
   ubuntu-latest-cuda:
     runs-on: ubuntu-22.04
 
@@ -931,6 +988,7 @@ jobs:
     needs:
       - ubuntu-latest-rocm
       - ubuntu-latest-cmake
+      - alpine-musl-cmake
       - ubuntu-latest-cuda
       - ubuntu-arm64-cuda
       - windows-latest-cmake-hip
