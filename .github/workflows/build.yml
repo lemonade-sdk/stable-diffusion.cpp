@@ -59,16 +59,16 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Disable -march=native and pin CPU instruction set to AVX2+FMA+F16C so
-          # the released x86_64 binary runs on hosts without AVX-512.
-          # Without GGML_NATIVE=OFF, ggml's CMake auto-enables every extension
-          # the build runner's CPU has (including AVX-512 on Azure Xeon
-          # Platinum 8370C runners), which then SIGILLs on AVX-512-less hosts.
+          # Build a fat package: one libstable-diffusion.so plus a libggml-cpu-*.so
+          # per CPU variant (sandybridge, haswell, skylakex, icelake, alderlake,
+          # x64). At runtime ggml dlopens whichever variant is highest-priority on
+          # the host CPU (alderlake → icelake → skylakex → haswell → sandybridge → x64),
+          # so the same zip runs on AVX-512 hosts and older non-AVX2 hosts alike —
+          # no -march=native runner lottery, no SIGILL.
           cmake .. \
             -DGGML_NATIVE=OFF \
-            -DGGML_AVX2=ON \
-            -DGGML_FMA=ON \
-            -DGGML_F16C=ON \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_CPU_ALL_VARIANTS=ON \
             -DSD_BUILD_SHARED_LIBS=ON
           cmake --build . --config Release
 
@@ -802,16 +802,16 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Same portability concern as ubuntu-latest-cmake: pin the host CPU
-          # instruction set so the binary runs on AVX-512-less ROCm hosts too.
+          # Fat package: same approach as ubuntu-latest-cmake. The HIPBLAS build
+          # still uses ggml's CPU ops for parts of the pipeline (CLIP encoding,
+          # etc.), so it benefits from per-CPU variants the same way.
           cmake .. -G Ninja \
             -DCMAKE_HIP_COMPILER="$(hipconfig -l)/clang" \
             -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
             -DCMAKE_BUILD_TYPE=Release \
             -DGGML_NATIVE=OFF \
-            -DGGML_AVX2=ON \
-            -DGGML_FMA=ON \
-            -DGGML_F16C=ON \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_CPU_ALL_VARIANTS=ON \
             -DSD_HIPBLAS=ON \
             -DHIP_PLATFORM=amd \
             -DGPU_TARGETS="${{ matrix.gpu_targets }}" \
