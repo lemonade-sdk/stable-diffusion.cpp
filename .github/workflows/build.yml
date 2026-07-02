@@ -921,7 +921,12 @@ jobs:
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
 
   release:
-    if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+    # always() overrides the default behavior of skipping this job when a
+    # needed build job fails (e.g. one CUDA sm_* matrix leg fails while
+    # sibling legs succeed and upload). The job must still run so the
+    # per-family checks below can decide what's actually complete and safe
+    # to publish.
+    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
 
     permissions:
       contents: write
