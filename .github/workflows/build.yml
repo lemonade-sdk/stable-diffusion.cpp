@@ -23,7 +23,11 @@ on:
 
 env:
   BRANCH_NAME: master
-  SD_REF: ${{ github.event.inputs.sd_ref || '8caa3f908ae6d4a4bef531e73b9a969f266a3d1f' }}
+  # Upstream ref every job checks out. Empty on schedule/PR (no inputs) so
+  # actions/checkout uses leejet's default branch = latest master, preserving the
+  # fork's original nightly behavior. A manual dispatch defaults to the sd_ref
+  # input so a deliberate build matches lemonade's sd-cpp pin (master-721-8caa3f9).
+  SD_REF: ${{ github.event.inputs.sd_ref }}
 
 permissions:
   contents: read
@@ -179,6 +183,80 @@ jobs:
         with:
           name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip
           path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip
+
+  # musl (Alpine) — Vulkan. Same self-contained-archive approach as the CPU job;
+  # the Vulkan backend loads libvulkan at runtime (not bundled) via the loader.
+  alpine-musl-vulkan:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            cpu_flags: "-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            cpu_flags: ""
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
+
+      - name: Build (Alpine / musl)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:latest sh -euxc '
+            apk add --no-cache build-base cmake git zip patchelf file \
+              vulkan-loader-dev vulkan-headers glslang shaderc spirv-tools spirv-headers
+            cmake -B build -S . \
+              -DGGML_NATIVE=OFF \
+              ${{ matrix.cpu_flags }} \
+              -DSD_VULKAN=ON \
+              -DSD_BUILD_SHARED_LIBS=ON \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+            cmake --build build --config Release -j"$(nproc)"
+
+            # ggml shared libs land outside build/bin; collect them next to the
+            # binaries so the flattened archive is self-contained.
+            find build -name "libggml*.so*" ! -path "build/bin/*" -exec cp -av {} build/bin/ \;
+
+            # The build tree bakes an absolute rpath; rewrite to $ORIGIN so the
+            # relocated musl binaries find their sibling .so files at runtime.
+            for f in build/bin/*; do
+              [ -f "$f" ] && ! [ -L "$f" ] || continue
+              if file "$f" | grep -q ELF; then
+                patchelf --set-rpath "\$ORIGIN" "$f"
+              fi
+            done
+
+            chmod -R a+rwX build
+          '
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-vulkan-${{ matrix.arch }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-vulkan-${{ matrix.arch }}.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-vulkan-${{ matrix.arch }}.zip
 
   ubuntu-latest-cuda:
     runs-on: ubuntu-22.04
@@ -1022,6 +1100,7 @@ jobs:
       - ubuntu-latest-rocm
       - ubuntu-latest-cmake
       - alpine-musl-cmake
+      - alpine-musl-vulkan
       - ubuntu-latest-cuda
       - ubuntu-arm64-cuda
       - windows-latest-cmake-hip
