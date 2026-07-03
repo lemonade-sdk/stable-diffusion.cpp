@@ -10,9 +10,9 @@ on:
         required: true
         type: boolean
       sd_ref:
-        description: "leejet/stable-diffusion.cpp ref to build (pin to match lemonade's sd-cpp version, e.g. 8caa3f9 for master-721-8caa3f9)"
+        description: "leejet/stable-diffusion.cpp ref to build — FULL 40-char SHA (checkout rejects short SHAs). 8caa3f908ae6d4a4bef531e73b9a969f266a3d1f -> tag master-721-8caa3f9"
         required: false
-        default: "8caa3f9"
+        default: "8caa3f908ae6d4a4bef531e73b9a969f266a3d1f"
         type: string
   pull_request: # validate the release build on PRs; the release job is skipped so nothing is published
     paths:
@@ -23,7 +23,7 @@ on:
 
 env:
   BRANCH_NAME: master
-  SD_REF: ${{ github.event.inputs.sd_ref || '8caa3f9' }}
+  SD_REF: ${{ github.event.inputs.sd_ref || '8caa3f908ae6d4a4bef531e73b9a969f266a3d1f' }}
 
 permissions:
   contents: read
