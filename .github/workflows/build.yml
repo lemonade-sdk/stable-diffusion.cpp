@@ -9,6 +9,11 @@ on:
         description: "Create new release"
         required: true
         type: boolean
+      sd_ref:
+        description: "leejet/stable-diffusion.cpp ref to build — FULL 40-char SHA (checkout rejects short SHAs). 8caa3f908ae6d4a4bef531e73b9a969f266a3d1f -> tag master-721-8caa3f9"
+        required: false
+        default: "8caa3f908ae6d4a4bef531e73b9a969f266a3d1f"
+        type: string
   pull_request: # validate the release build on PRs; the release job is skipped so nothing is published
     paths:
       # The build jobs clone stable-diffusion.cpp source from upstream
@@ -18,6 +23,11 @@ on:
 
 env:
   BRANCH_NAME: master
+  # Upstream ref every job checks out. Empty on schedule/PR (no inputs) so
+  # actions/checkout uses leejet's default branch = latest master, preserving the
+  # fork's original nightly behavior. A manual dispatch defaults to the sd_ref
+  # input so a deliberate build matches lemonade's sd-cpp pin (master-721-8caa3f9).
+  SD_REF: ${{ github.event.inputs.sd_ref }}
 
 permissions:
   contents: read
@@ -37,6 +47,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -101,6 +112,152 @@ jobs:
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
+  # musl (Alpine) — CPU. Compiled inside an Alpine container so it links musl;
+  # libstdc++/libgcc are static so the archive is self-contained.
+  alpine-musl-cmake:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            cpu_flags: "-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            cpu_flags: ""
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
+
+      - name: Build (Alpine / musl)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:latest sh -euxc '
+            apk add --no-cache build-base cmake git zip patchelf file
+            cmake -B build -S . \
+              -DGGML_NATIVE=OFF \
+              ${{ matrix.cpu_flags }} \
+              -DSD_BUILD_SHARED_LIBS=ON \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+            cmake --build build --config Release -j"$(nproc)"
+
+            # ggml shared libs land outside build/bin; collect them next to the
+            # binaries so the flattened archive is self-contained.
+            find build -name "libggml*.so*" ! -path "build/bin/*" -exec cp -av {} build/bin/ \;
+
+            # The build tree bakes an absolute rpath; rewrite to $ORIGIN so the
+            # relocated musl binaries find their sibling .so files at runtime.
+            for f in build/bin/*; do
+              [ -f "$f" ] && ! [ -L "$f" ] || continue
+              if file "$f" | grep -q ELF; then
+                patchelf --set-rpath "\$ORIGIN" "$f"
+              fi
+            done
+
+            chmod -R a+rwX build
+          '
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-${{ matrix.arch }}.zip
+
+  # musl (Alpine) — Vulkan. Same self-contained-archive approach as the CPU job;
+  # the Vulkan backend loads libvulkan at runtime (not bundled) via the loader.
+  alpine-musl-vulkan:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            cpu_flags: "-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            cpu_flags: ""
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
+
+      - name: Build (Alpine / musl)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:latest sh -euxc '
+            apk add --no-cache build-base cmake git zip patchelf file \
+              vulkan-loader-dev vulkan-headers glslang shaderc spirv-tools spirv-headers
+            cmake -B build -S . \
+              -DGGML_NATIVE=OFF \
+              ${{ matrix.cpu_flags }} \
+              -DSD_VULKAN=ON \
+              -DSD_BUILD_SHARED_LIBS=ON \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+            cmake --build build --config Release -j"$(nproc)"
+
+            # ggml shared libs land outside build/bin; collect them next to the
+            # binaries so the flattened archive is self-contained.
+            find build -name "libggml*.so*" ! -path "build/bin/*" -exec cp -av {} build/bin/ \;
+
+            # The build tree bakes an absolute rpath; rewrite to $ORIGIN so the
+            # relocated musl binaries find their sibling .so files at runtime.
+            for f in build/bin/*; do
+              [ -f "$f" ] && ! [ -L "$f" ] || continue
+              if file "$f" | grep -q ELF; then
+                patchelf --set-rpath "\$ORIGIN" "$f"
+              fi
+            done
+
+            chmod -R a+rwX build
+          '
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-vulkan-${{ matrix.arch }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-vulkan-${{ matrix.arch }}.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Linux-musl-vulkan-${{ matrix.arch }}.zip
+
   ubuntu-latest-cuda:
     runs-on: ubuntu-22.04
 
@@ -118,7 +275,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
-          ref: master
+          ref: ${{ env.SD_REF }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -219,7 +376,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
-          ref: master
+          ref: ${{ env.SD_REF }}
 
       - name: Install CUDA Toolkit
         id: cuda-toolkit
@@ -309,7 +466,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
-          ref: master
+          ref: ${{ env.SD_REF }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -402,6 +559,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -521,6 +679,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: Cache ROCm Installation
         id: cache-rocm
@@ -608,6 +767,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -729,6 +889,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -877,6 +1038,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.21
@@ -937,6 +1099,8 @@ jobs:
     needs:
       - ubuntu-latest-rocm
       - ubuntu-latest-cmake
+      - alpine-musl-cmake
+      - alpine-musl-vulkan
       - ubuntu-latest-cuda
       - ubuntu-arm64-cuda
       - windows-latest-cmake-hip
@@ -953,6 +1117,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ env.SD_REF }}
 
       - name: Download artifacts
         id: download-artifact
