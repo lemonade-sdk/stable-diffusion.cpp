@@ -59,17 +59,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          # Disable -march=native and pin CPU instruction set to AVX2+FMA+F16C so
-          # the released x86_64 binary runs on hosts without AVX-512.
-          # Without GGML_NATIVE=OFF, ggml's CMake auto-enables every extension
-          # the build runner's CPU has (including AVX-512 on Azure Xeon
-          # Platinum 8370C runners), which then SIGILLs on AVX-512-less hosts.
-          cmake .. \
-            -DGGML_NATIVE=OFF \
-            -DGGML_AVX2=ON \
-            -DGGML_FMA=ON \
-            -DGGML_F16C=ON \
-            -DSD_BUILD_SHARED_LIBS=ON
+          cmake .. -DSD_BUILD_SHARED_LIBS=ON -DGGML_NATIVE=OFF -DSD_BUILD_SHARED_GGML_LIB=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN'
           cmake --build . --config Release
 
       - name: Get commit hash
@@ -112,11 +102,6 @@ jobs:
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
 
-      - name: Setup Vulkan deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvulkan-dev spirv-headers
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -131,17 +116,14 @@ jobs:
         id: depends
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libgl-dev
+          sudo apt-get install build-essential libvulkan-dev glslc spirv-headers
 
       - name: Build
         id: cmake_build
         run: |
           mkdir build
           cd build
-          cmake .. \
-            -DSD_VULKAN=ON \
-            -DGGML_NATIVE=OFF \
-            -DSD_BUILD_SHARED_LIBS=ON
+          cmake .. -DSD_BUILD_SHARED_LIBS=ON -DSD_VULKAN=ON -DGGML_NATIVE=OFF -DSD_BUILD_SHARED_GGML_LIB=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN'
           cmake --build . --config Release
 
       - name: Get commit hash
@@ -465,10 +447,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - build: "avx2"
-            defines: "-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DSD_BUILD_SHARED_LIBS=ON"
+          - build: "cpu"
+            defines: "-DGGML_NATIVE=OFF -DSD_BUILD_SHARED_LIBS=ON -DSD_BUILD_SHARED_GGML_LIB=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"
+          - build: "cuda12"
+            defines: "-DSD_CUDA=ON -DSD_BUILD_SHARED_LIBS=ON -DCMAKE_CUDA_ARCHITECTURES='61;70;75;80;86;89;90;100;120' -DCMAKE_CUDA_FLAGS='-Xcudafe \"--diag_suppress=177\" -Xcudafe \"--diag_suppress=550\"' -DGGML_NATIVE=OFF -DSD_BUILD_SHARED_GGML_LIB=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"
           - build: "vulkan"
-            defines: "-DSD_VULKAN=ON -DSD_BUILD_SHARED_LIBS=ON -DGGML_NATIVE=OFF"
+            defines: "-DSD_VULKAN=ON -DSD_BUILD_SHARED_LIBS=ON -DGGML_NATIVE=OFF -DSD_BUILD_SHARED_GGML_LIB=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"
     steps:
       - name: Clone
         uses: actions/checkout@v6
@@ -516,19 +500,6 @@ jobs:
           cd build
           cmake .. -DCMAKE_CXX_FLAGS='/bigobj' -G Ninja -DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe -DCMAKE_BUILD_TYPE=Release ${{ matrix.defines }}
           cmake --build .
-
-      - name: Check AVX512F support
-        id: check_avx512f
-        if: ${{ matrix.build == 'avx512' }}
-        continue-on-error: true
-        run: |
-          cd build
-          $vcdir = $(vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-          $msvc = $(join-path $vcdir $('VC\Tools\MSVC\'+$(gc -raw $(join-path $vcdir 'VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt')).Trim()))
-          $cl =  $(join-path $msvc 'bin\Hostx64\x64\cl.exe')
-          echo 'int main(void){unsigned int a[4];__cpuid(a,7);return !(a[1]&65536);}' >> avx512f.c
-          & $cl /O2 /GS- /kernel avx512f.c /link /nodefaultlib /entry:main
-          .\avx512f.exe && echo "AVX512F: YES" && ( echo HAS_AVX512F=1 >> $env:GITHUB_ENV ) || echo "AVX512F: NO"
 
       - name: Get commit hash
         id: commit
