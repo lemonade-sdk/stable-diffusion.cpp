@@ -842,10 +842,8 @@ jobs:
         include:
           - os: macos-14
             label: macos-14
-            archive_suffix: ""
           - os: macos-latest
             label: macos-latest
-            archive_suffix: "-latest"
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -883,21 +881,29 @@ jobs:
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: prompt/actions-commit-hash@v2
 
+      - name: Fetch system info
+        id: system-info
+        run: |
+          echo "CPU_ARCH=`uname -m`" >> "$GITHUB_OUTPUT"
+          echo "OS_NAME=`sw_vers -productName`" >> "$GITHUB_OUTPUT"
+          echo "OS_VERSION=`sw_vers -productVersion`" >> "$GITHUB_OUTPUT"
+          echo "OS_TYPE=`uname -s`" >> "$GITHUB_OUTPUT"
+
       - name: Pack artifacts
         id: pack_artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip ./build/bin/*
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip ./build/bin/*
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
           path: |
-            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-Darwin-arm64-metal${{ matrix.archive_suffix }}.zip
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
   release:
     # always() overrides the default behavior of skipping this job when a
@@ -1010,7 +1016,7 @@ jobs:
           # version via lsb_release, so it's wildcarded rather than pinned.
           check_family cpu \
             "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64.zip" \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-win-avx2-x64.zip"
+            "artifact/sd-${BRANCH}-${SHORT}-bin-win-cpu-x64.zip"
 
           # Vulkan: same runner as CPU, differs only in -DSD_VULKAN=ON.
           # Only builds Linux since the runner doesn't have a dedicated Windows vulkan build.
@@ -1018,8 +1024,7 @@ jobs:
             "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64-vulkan.zip"
 
           check_family metal \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-arm64-metal.zip" \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-arm64-metal-latest.zip"
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-macOS-*-arm64.zip"
 
           echo "missing=$total_missing" >> "$GITHUB_OUTPUT"
           echo "summary=$summary" >> "$GITHUB_OUTPUT"
