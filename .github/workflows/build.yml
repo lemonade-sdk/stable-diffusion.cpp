@@ -1,51 +1,26 @@
 name: CI
 
 on:
+  schedule:
+    - cron: '0 3 * * *' # nightly at 03:00 UTC
   workflow_dispatch: # allows manual triggering
     inputs:
       create_release:
         description: "Create new release"
         required: true
         type: boolean
-  push:
-    branches:
-      - master
-      - ci
+  pull_request: # validate the release build on PRs; the release job is skipped so nothing is published
     paths:
-      [
-        ".github/workflows/**",
-        ".dockerignore",
-        "docker/Dockerfile*",
-        "**/CMakeLists.txt",
-        "**/Makefile",
-        "**/*.h",
-        "**/*.hpp",
-        "**/*.c",
-        "**/*.cpp",
-        "**/*.cu",
-        "examples/server/frontend",
-        "examples/server/frontend/**",
-      ]
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      [
-        ".github/workflows/**",
-        ".dockerignore",
-        "docker/Dockerfile*",
-        "**/CMakeLists.txt",
-        "**/Makefile",
-        "**/*.h",
-        "**/*.hpp",
-        "**/*.c",
-        "**/*.cpp",
-        "**/*.cu",
-        "examples/server/frontend",
-        "examples/server/frontend/**",
-      ]
+      # The build jobs clone stable-diffusion.cpp source from upstream
+      # (leejet/stable-diffusion.cpp), so only changes to this workflow itself
+      # can affect the outcome of a PR run. Scope PR runs to it.
+      - '.github/workflows/build.yml'
 
 env:
-  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+  BRANCH_NAME: master
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
@@ -57,10 +32,10 @@ jobs:
 
     steps:
       - name: Clone
-        id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -88,7 +63,7 @@ jobs:
 
       - name: Get commit hash
         id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: prompt/actions-commit-hash@v2
 
       - name: Fetch system info
@@ -101,14 +76,14 @@ jobs:
 
       - name: Pack artifacts
         id: pack_artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
           zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip ./build/bin/*
 
       - name: Upload artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
@@ -120,10 +95,10 @@ jobs:
 
     steps:
       - name: Clone
-        id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -151,7 +126,7 @@ jobs:
 
       - name: Get commit hash
         id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: prompt/actions-commit-hash@v2
 
       - name: Fetch system info
@@ -164,174 +139,342 @@ jobs:
 
       - name: Pack artifacts
         id: pack_artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
           zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-vulkan.zip ./build/bin/*
 
       - name: Upload artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-vulkan.zip
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-vulkan.zip
 
-  build-and-push-docker-images:
-    name: Build and push container images
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ${{ matrix.runner }}
-
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
+  ubuntu-latest-cuda:
+    runs-on: ubuntu-22.04
 
     strategy:
+      fail-fast: false
       matrix:
-        variant: [musa, sycl, vulkan, cuda]
-        platform: [linux/amd64]
-        runner: [ubuntu-latest]
-        build-args: [""]
-        tag-suffix: [""]
-        include:
-          - variant: cuda
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
-            tag-suffix: "-spark"
-            build-args: |
-              CUDA_VERSION=13.0.0
-              UBUNTU_VERSION=24.04
-              CUDA_ARCHITECTURES=121
-              GGML_CUDA_FA_ALL_QUANTS=ON
-              GGML_CUDA_ENABLE_DYNAMIC_CPU_BACKENDS=OFF
-
-    env:
-      REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.15.1
-
-      - name: Get commit hash
-        id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
-        uses: prompt/actions-commit-hash@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to the container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@v1.3.1
-        with:
-          # this might remove tools that are actually needed,
-          # if set to "true" but frees about 6 GB
-          tool-cache: false
-
-      - name: Build and push Docker image
-        id: build-push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          push: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
-          file: docker/Dockerfile.${{ matrix.variant }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.BRANCH_NAME }}-${{ matrix.variant }}${{ matrix.tag-suffix }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          build-args: ${{ matrix.build-args }}
-
-  macOS-latest-cmake:
-    runs-on: macos-latest
+        # On PRs only build one representative arch (packaging logic is identical
+        # across all sm_*); build the full matrix on schedule/dispatch.
+        sm: ${{ github.event_name == 'pull_request' && fromJSON('["sm_89"]') || fromJSON('["sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120", "sm_121"]') }}
 
     steps:
       - name: Clone
-        id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
         with:
-          node-version: 20
+          key: ubuntu-cuda-${{ matrix.sm }}
+          evict-old-files: 1d
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.15.1
-
-      - name: Dependencies
-        id: depends
+      - name: Free disk space
         run: |
-          brew install zip
+          sudo apt-get remove -y '^aspnetcore-.*' '^dotnet-.*' '^llvm-.*' 'php.*' 'ruby.*' \
+            google-cloud-cli azure-cli google-chrome-stable firefox powershell 2>/dev/null || true
+          sudo apt-get autoremove -y
+          df -h
+
+      - name: Install CUDA Toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          # The cuda-toolkit-12-9 metapackage is ~3.9 GB of archives and drags
+          # in Nsight, cuFFT, cuSPARSE, cuSOLVER and NPP, none of which
+          # ggml-cuda links or this workflow ships. Install just what the Build
+          # and Bundle steps consume (~1.2 GB): nvcc, cudart-dev (also supplies
+          # the libcuda stub behind CUDA::cuda_driver), cccl for thrust/cub,
+          # cublas, and the curand/nvjitlink libs the bundle step copies.
+          sudo apt-get install -y \
+            cuda-nvcc-12-9 \
+            cuda-cudart-dev-12-9 \
+            cuda-cccl-12-9 \
+            libcublas-dev-12-9 \
+            libcurand-dev-12-9 \
+            libnvjitlink-dev-12-9 \
+            cmake ninja-build patchelf
+
+          # Fail here, naming the missing file, rather than partway through the
+          # compile if NVIDIA repackages any of the above.
+          for f in /usr/local/cuda/bin/nvcc \
+                   /usr/local/cuda/include/cublas_v2.h \
+                   /usr/local/cuda/include/cub/cub.cuh \
+                   /usr/local/cuda/lib64/libcudart.so \
+                   /usr/local/cuda/lib64/libcublas.so \
+                   /usr/local/cuda/lib64/libcublasLt.so \
+                   /usr/local/cuda/lib64/libcurand.so \
+                   /usr/local/cuda/lib64/libnvJitLink.so; do
+            [ -e "$f" ] || { echo "::error::CUDA install is missing $f"; exit 1; }
+          done
+
+      - name: Set CUDA environment
+        run: |
+          echo "CUDA_PATH=/usr/local/cuda" >> "$GITHUB_ENV"
+          echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Build
         id: cmake_build
         run: |
-          sysctl -a
-          mkdir build
-          cd build
-          cmake .. -DGGML_AVX2=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DSD_BUILD_SHARED_LIBS=ON
-          cmake --build . --config Release
+          cmake_arch="${{ matrix.sm }}"
+          cmake_arch="${cmake_arch#sm_}"
+          cmake -B build -S . \
+            -DSD_CUBLAS=ON \
+            -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="${cmake_arch}" \
+            -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+            -DGGML_NATIVE=OFF \
+            -DSD_BUILD_SHARED_LIBS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j $(nproc)
+
+      - name: Bundle CUDA runtime libraries
+        run: |
+          cuda_lib=/usr/local/cuda/lib64
+          cp -av ${cuda_lib}/libcudart.so*    build/bin/
+          cp -av ${cuda_lib}/libcublas.so*    build/bin/
+          cp -av ${cuda_lib}/libcublasLt.so*  build/bin/
+          cp -av ${cuda_lib}/libcurand.so*    build/bin/
+          cp -av ${cuda_lib}/libnvJitLink.so* build/bin/
+          # Copy all ggml shared libs (libggml.so, libggml-base.so, libggml-cuda.so, etc.)
+          # from wherever cmake placed them outside build/bin/ into the distribution dir.
+          find build -name 'libggml*.so*' ! -path 'build/bin/*' -exec cp -av {} build/bin/ \;
+
+      - name: Set RPATH for portable distribution
+        run: |
+          for f in build/bin/*; do
+            [ -f "$f" ] && ! [ -L "$f" ] || continue
+            if file "$f" | grep -q 'ELF'; then
+              patchelf --set-rpath '$ORIGIN' "$f"
+            fi
+          done
 
       - name: Get commit hash
         id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: prompt/actions-commit-hash@v2
-
-      - name: Fetch system info
-        id: system-info
-        run: |
-          echo "CPU_ARCH=`uname -m`" >> "$GITHUB_OUTPUT"
-          echo "OS_NAME=`sw_vers -productName`" >> "$GITHUB_OUTPUT"
-          echo "OS_VERSION=`sw_vers -productVersion`" >> "$GITHUB_OUTPUT"
-          echo "OS_TYPE=`uname -s`" >> "$GITHUB_OUTPUT"
 
       - name: Pack artifacts
         id: pack_artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip ./build/bin/*
+          tar -I 'xz -T0' -cf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz -C ./build/bin .
 
       - name: Upload artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
-          path: |
-            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
+
+  windows-latest-cuda:
+    runs-on: windows-2022
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # On PRs only build one representative arch (packaging logic is identical
+        # across all sm_*); build the full matrix on schedule/dispatch.
+        sm: ${{ github.event_name == 'pull_request' && fromJSON('["sm_89"]') || fromJSON('["sm_75", "sm_80", "sm_86", "sm_89", "sm_90", "sm_100", "sm_120", "sm_121"]') }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install CUDA Toolkit
+        id: cuda-toolkit
+        uses: Jimver/cuda-toolkit@v0.2.35
+        with:
+          cuda: '12.9.1'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "nvjitlink", "thrust", "visual_studio_integration"]'
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
+        with:
+          key: windows-cuda-${{ matrix.sm }}
+          variant: ccache
+          evict-old-files: 1d
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set sm=${{ matrix.sm }}
+          set cmake_arch=%sm:sm_=%
+          cmake -S . -B build -G "Ninja Multi-Config" ^
+            -DSD_CUBLAS=ON ^
+            -DGGML_CUDA=ON ^
+            -DCMAKE_CUDA_ARCHITECTURES=%cmake_arch% ^
+            -DGGML_NATIVE=OFF ^
+            -DSD_BUILD_SHARED_LIBS=ON ^
+            -DCMAKE_CXX_FLAGS=/bigobj
+          cmake --build build --config Release
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          Copy-Item ggml/LICENSE .\build\bin\Release\ggml.txt
+          Copy-Item LICENSE .\build\bin\Release\stable-diffusion.cpp.txt
+          $cudaBin = Join-Path $env:CUDA_PATH 'bin'
+          $runtimeDllPatterns = @(
+            'cudart64_*.dll',
+            'cublas64_*.dll',
+            'cublasLt64_*.dll',
+            'curand64_*.dll',
+            'nvJitLink_*.dll'
+          )
+          foreach ($pattern in $runtimeDllPatterns) {
+            $dll = Get-ChildItem -Path $cudaBin -Filter $pattern -ErrorAction Stop | Sort-Object Name -Descending | Select-Object -First 1
+            if (-not $dll) { throw "Required CUDA runtime DLL matching '$pattern' was not found in $cudaBin" }
+            Copy-Item $dll.FullName .\build\bin\Release
+          }
+          # Copy all ggml DLLs (ggml.dll, ggml-base.dll, ggml-cuda.dll, etc.)
+          # from wherever cmake placed them outside build\bin\Release\ into the distribution dir.
+          Get-ChildItem -Path build -Filter 'ggml*.dll' -Recurse |
+            Where-Object { $_.FullName -notlike '*\bin\Release\*' } |
+            ForEach-Object { Copy-Item $_.FullName .\build\bin\Release\ -Force }
+          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip .\build\bin\Release\*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
+
+  ubuntu-arm64-cuda:
+    # GB10 (sm_121) ARM64 Linux build
+    runs-on: ubuntu-24.04-arm
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # sm_121 targets the GB10 (Blackwell) ARM64 device
+        sm: ["sm_121"]
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
+        with:
+          key: ubuntu-arm64-cuda-${{ matrix.sm }}
+          evict-old-files: 1d
+
+      - name: Install CUDA Toolkit
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          # See the x64 job above for why this is a hand-picked subset rather
+          # than the cuda-toolkit-12-9 metapackage.
+          sudo apt-get install -y \
+            cuda-nvcc-12-9 \
+            cuda-cudart-dev-12-9 \
+            cuda-cccl-12-9 \
+            libcublas-dev-12-9 \
+            libcurand-dev-12-9 \
+            libnvjitlink-dev-12-9 \
+            cmake ninja-build patchelf
+
+          for f in /usr/local/cuda/bin/nvcc \
+                   /usr/local/cuda/include/cublas_v2.h \
+                   /usr/local/cuda/include/cub/cub.cuh \
+                   /usr/local/cuda/lib64/libcudart.so \
+                   /usr/local/cuda/lib64/libcublas.so \
+                   /usr/local/cuda/lib64/libcublasLt.so \
+                   /usr/local/cuda/lib64/libcurand.so \
+                   /usr/local/cuda/lib64/libnvJitLink.so; do
+            [ -e "$f" ] || { echo "::error::CUDA install is missing $f"; exit 1; }
+          done
+
+      - name: Set CUDA environment
+        run: |
+          echo "CUDA_PATH=/usr/local/cuda" >> "$GITHUB_ENV"
+          echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Build
+        id: cmake_build
+        run: |
+          cmake_arch="${{ matrix.sm }}"
+          cmake_arch="${cmake_arch#sm_}"
+          cmake -B build -S . \
+            -DSD_CUBLAS=ON \
+            -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="${cmake_arch}" \
+            -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+            -DGGML_NATIVE=OFF \
+            -DSD_BUILD_SHARED_LIBS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release -j $(nproc)
+
+      - name: Bundle CUDA runtime libraries
+        run: |
+          cuda_lib=/usr/local/cuda/lib64
+          cp -av ${cuda_lib}/libcudart.so*    build/bin/
+          cp -av ${cuda_lib}/libcublas.so*    build/bin/
+          cp -av ${cuda_lib}/libcublasLt.so*  build/bin/
+          cp -av ${cuda_lib}/libcurand.so*    build/bin/
+          cp -av ${cuda_lib}/libnvJitLink.so* build/bin/
+          find build -name 'libggml*.so*' ! -path 'build/bin/*' -exec cp -av {} build/bin/ \;
+
+      - name: Set RPATH for portable distribution
+        run: |
+          for f in build/bin/*; do
+            [ -f "$f" ] && ! [ -L "$f" ] || continue
+            if file "$f" | grep -q 'ELF'; then
+              patchelf --set-rpath '$ORIGIN' "$f"
+            fi
+          done
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          tar -I 'xz -T0' -cf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-arm64.tar.xz -C ./build/bin .
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-arm64.tar.xz
+          path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-arm64.tar.xz
 
   windows-latest-cmake:
     runs-on: windows-2022
@@ -350,10 +493,10 @@ jobs:
             defines: "-DSD_VULKAN=ON -DSD_BUILD_SHARED_LIBS=ON -DGGML_NATIVE=OFF -DSD_BUILD_SHARED_GGML_LIB=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"
     steps:
       - name: Clone
-        id: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -383,6 +526,14 @@ jobs:
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
 
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
+        with:
+          key: windows-cmake-${{ matrix.build }}
+          variant: ccache
+          evict-old-files: 1d
+          max-size: ${{ matrix.build == 'cuda12' && '2G' || '500M' }}
+
       - name: Activate MSVC environment
         id: msvc_dev_cmd
         uses: ilammy/msvc-dev-cmd@v1
@@ -397,12 +548,12 @@ jobs:
 
       - name: Get commit hash
         id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: prompt/actions-commit-hash@v2
 
       - name: Pack artifacts
         id: pack_artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           $filePath = ".\build\bin\Release\*"
           if (Test-Path $filePath) {
@@ -422,7 +573,7 @@ jobs:
 
       - name: Copy and pack Cuda runtime
         id: pack_cuda_runtime
-        if: ${{ matrix.build == 'cuda12' && (github.event_name == 'push' && github.ref == 'refs/heads/master' || github.event.inputs.create_release == 'true') }}
+        if: ${{ matrix.build == 'cuda12' && (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
         run: |
           echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
           $dst='.\build\bin\cudart\'
@@ -430,7 +581,7 @@ jobs:
           7z a cudart-sd-bin-win-cu12-x64.zip $dst\*
 
       - name: Upload Cuda runtime
-        if: ${{ matrix.build == 'cuda12' && (github.event_name == 'push' && github.ref == 'refs/heads/master' || github.event.inputs.create_release == 'true') }}
+        if: ${{ matrix.build == 'cuda12' && (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
         uses: actions/upload-artifact@v4
         with:
           name: sd-cudart-sd-bin-win-cu12-x64.zip
@@ -438,7 +589,7 @@ jobs:
             cudart-sd-bin-win-cu12-x64.zip
 
       - name: Upload artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-${{ matrix.build }}-x64.zip
@@ -450,12 +601,15 @@ jobs:
 
     env:
       ROCM_VERSION: "7.14.0"
-      GPU_TARGETS: "gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+      GPU_TARGETS: "gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -496,7 +650,7 @@ jobs:
 
           write-host "Installing ROCm wheels for multi-arch support"
           # Install ROCm wheels for multi-arch support (this may take several minutes)
-          python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,devel]==${{env.ROCM_VERSION}}"
+          python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,devel]"
 
           # Pre-expand the devel tree so it is included in the cache
           write-host "Initializing ROCm devel tree"
@@ -555,16 +709,16 @@ jobs:
 
       - name: Get commit hash
         id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: pr-mpt/actions-commit-hash@v2
 
       - name: Pack artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ env.ROCM_VERSION }}-x64.zip .\build\bin\*
 
       - name: Upload artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ env.ROCM_VERSION }}-x64.zip
@@ -581,7 +735,7 @@ jobs:
       matrix:
         include:
           - ROCM_VERSION: "7.14.0"
-            gpu_targets: "gfx900;gfx906;gfx908;gfx90a;gfx90c;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+            gpu_targets: "gfx900;gfx906;gfx908;gfx90a;gfx90c;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
             build: x64
 
     steps:
@@ -590,6 +744,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -632,7 +787,7 @@ jobs:
           # libraries = HIP runtime and CMake configs needed for linking
           # devel = compilers, headers, static libs
           python -m pip install --upgrade pip
-          python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,devel]==${{matrix.ROCM_VERSION}}"
+          python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,devel]"
 
           # Get ROCm installation paths using the rocm-sdk CLI tool
           ROCM_PATH=$(rocm-sdk path --root)
@@ -688,12 +843,12 @@ jobs:
 
       - name: Get commit hash
         id: commit
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: prompt/actions-commit-hash@v2
 
       - name: Prepare artifacts
         id: prepare_artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           # Copy licenses
           cp ggml/LICENSE ./build/bin/ggml.txt
@@ -709,38 +864,119 @@ jobs:
 
       - name: Pack artifacts
         id: pack_artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
           zip -y -r sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip ./build/bin
 
       - name: Upload artifacts
-        if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip
 
+  macos-arm64-cmake:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macos-14
+          - os: macos-latest
+            label: macos-latest
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.21
+        with:
+          key: macos-arm64-${{ matrix.label }}
+          evict-old-files: 1d
+
+      - name: Build
+        id: cmake_build
+        run: |
+          sysctl -a
+          mkdir build
+          cd build
+          cmake .. \
+            -DGGML_METAL=ON \
+            -DGGML_METAL_USE_BF16=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON \
+            -DSD_BUILD_SHARED_LIBS=ON \
+            -DCMAKE_INSTALL_RPATH='@loader_path' \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
+
+      - name: Get commit hash
+        id: commit
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: prompt/actions-commit-hash@v2
+
+      - name: Fetch system info
+        id: system-info
+        run: |
+          echo "CPU_ARCH=`uname -m`" >> "$GITHUB_OUTPUT"
+          echo "OS_NAME=`sw_vers -productName`" >> "$GITHUB_OUTPUT"
+          echo "OS_VERSION=`sw_vers -productVersion`" >> "$GITHUB_OUTPUT"
+          echo "OS_TYPE=`uname -s`" >> "$GITHUB_OUTPUT"
+
+      - name: Pack artifacts
+        id: pack_artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp ggml/LICENSE ./build/bin/ggml.txt
+          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          zip -j sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip ./build/bin/*
+
+      - name: Upload artifacts
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
+          path: |
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
+
   release:
-    if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+    # always() overrides the default behavior of skipping this job when a
+    # needed build job fails (e.g. one CUDA sm_* matrix leg fails while
+    # sibling legs succeed and upload). The job must still run so the
+    # per-family checks below can decide what's actually complete and safe
+    # to publish.
+    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
+
+    permissions:
+      contents: write
 
     runs-on: ubuntu-latest
 
     needs:
       - ubuntu-latest-cmake
       - ubuntu-latest-cmake-vulkan
+      - ubuntu-latest-cuda
+      - ubuntu-arm64-cuda
+      - windows-latest-cuda
       - ubuntu-latest-rocm
-      - build-and-push-docker-images
-      - macOS-latest-cmake
+      - macos-arm64-cmake
       - windows-latest-cmake
       - windows-latest-rocm
 
     steps:
       - name: Clone
-        uses: actions/checkout@v3
+        id: checkout
+        uses: actions/checkout@v6
         with:
+          submodules: recursive
           fetch-depth: 0
 
       - name: Download artifacts
@@ -760,34 +996,222 @@ jobs:
         id: commit
         uses: prompt/actions-commit-hash@v2
 
-      - name: Create release
-        id: create_release
-        if: ${{ github.event_name == 'workflow_dispatch' || github.ref_name == 'master' }}
-        uses: anzz1/action-create-release@v1
+      - name: Generate tag name
+        id: tag_name
+        run: |
+          TAG_NAME="${{ env.BRANCH_NAME }}-${{ steps.commit_count.outputs.count }}-${{ steps.commit.outputs.short }}"
+          echo "name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Check release artifacts
+        id: check_artifacts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ env.BRANCH_NAME }}
+          SHORT: ${{ steps.commit.outputs.short }}
+        run: |
+          total_missing=0
+          summary=""
+
+          check_family() {
+            local family="$1"; shift
+            local patterns=("$@")
+            local missing=0
+            for pattern in "${patterns[@]}"; do
+              if ! ls $pattern >/dev/null 2>&1; then
+                echo "::error::[$family] Missing artifact: $pattern"
+                missing=$((missing + 1))
+              fi
+            done
+            if [ "$missing" -gt 0 ]; then
+              echo "::warning::$family family is incomplete ($missing artifact(s) missing) — dropping all $family artifacts from this release."
+              for pattern in "${patterns[@]}"; do
+                rm -fv $pattern 2>/dev/null || true
+              done
+              total_missing=$((total_missing + missing))
+              summary="${summary}${summary:+, }${family}: $missing missing, family dropped"
+            fi
+          }
+
+          # Each backend family must be published as a complete, internally
+          # consistent set across every platform/variant/SDK it covers — never
+          # a partial mix. A gap in one family drops that whole family from
+          # the release; other families are unaffected.
+
+          # CUDA: 8 sm_* variants on ubuntu x64 and windows x64; only sm_121
+          # (GB10) is built for ubuntu arm64.
+          cuda_patterns=()
+          for sm in sm_75 sm_80 sm_86 sm_89 sm_90 sm_100 sm_120 sm_121; do
+            cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-${sm}-x64.tar.xz")
+            cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-windows-cuda-${sm}-x64.zip")
+          done
+          cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-sm_121-arm64.tar.xz")
+          check_family cuda "${cuda_patterns[@]}"
+
+          # TheRock nightly ROCm 7.14.0 (windows-latest-rocm + the 7.14.0 leg
+          # of ubuntu-latest-rocm). Kept separate from the HIP SDK line below
+          # since they're different SDKs, not just different platforms.
+          check_family rocm-therock \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-win-rocm-7.14.0-x64.zip" \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-Ubuntu-24.04-x86_64-rocm-7.14.0.zip"
+
+          # CPU: ubuntu-latest-cmake's filename embeds the runner's OS name/
+          # version via lsb_release, so it's wildcarded rather than pinned.
+          check_family cpu \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64.zip" \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-win-cpu-x64.zip"
+
+          # Vulkan: same runner as CPU, differs only in -DSD_VULKAN=ON.
+          # Only builds Linux since the runner doesn't have a dedicated Windows vulkan build.
+          check_family vulkan \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64-vulkan.zip"
+
+          check_family metal \
+            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-macOS-*-arm64.zip"
+
+          echo "missing=$total_missing" >> "$GITHUB_OUTPUT"
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+          files=$(find ./artifact -maxdepth 1 \( -name '*.zip' -o -name '*.tar.xz' \) 2>/dev/null | wc -l)
+
+          # Never create or update a release with nothing to publish.
+          if [ "$files" -eq 0 ]; then
+            echo "::error::No release artifacts found in ./artifact — aborting before creating a release."
+            exit 1
+          fi
+
+          if [ "$total_missing" -gt 0 ]; then
+            echo "$total_missing artifact(s) missing ($summary) — continuing to publish the $files artifact(s) from complete families. The job will still fail below so the gap gets noticed."
+          else
+            echo "All expected artifacts present. Found $files artifact(s) ready to upload."
+          fi
+
+      - name: Determine release summary
+        id: release_summary
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "value=Nightly release for ${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Get the release for this tag, creating it if it does not exist yet.
+      # This is idempotent: if a previous run created the release but failed
+      # partway through uploading (e.g. a transient GitHub outage), re-running
+      # reuses the existing release so the upload step below can fill the gaps.
+      - name: Create or get release
+        id: release
+        uses: actions/github-script@v8
+        env:
+          TAG_NAME: ${{ steps.tag_name.outputs.name }}
+          RELEASE_SUMMARY: ${{ steps.release_summary.outputs.value }}
         with:
-          tag_name: ${{ format('{0}-{1}-{2}', env.BRANCH_NAME, steps.commit_count.outputs.count, steps.commit.outputs.short) }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = process.env.TAG_NAME;
+            const { owner, repo } = context.repo;
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              core.info(`Reusing existing release ${tag} (id ${release.id})`);
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              try {
+                release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, body: process.env.RELEASE_SUMMARY })).data;
+                core.info(`Created release ${tag} (id ${release.id})`);
+              } catch (createError) {
+                if (createError.status !== 422) throw createError;
+                release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+                core.info(`Reusing concurrently created release ${tag} (id ${release.id})`);
+              }
+            }
+            core.setOutput('id', release.id);
 
       - name: Upload release
         id: upload_release
-        if: ${{ github.event_name == 'workflow_dispatch' || github.ref_name == 'master' }}
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.id }}
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            const path = require('path');
             const fs = require('fs');
-            const release_id = '${{ steps.create_release.outputs.id }}';
-            for (let file of await fs.readdirSync('./artifact')) {
-              if (path.extname(file) === '.zip') {
-                console.log('uploadReleaseAsset', file);
-                await github.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release_id,
-                  name: file,
-                  data: await fs.readFileSync(`./artifact/${file}`)
-                });
+            const { owner, repo } = context.repo;
+            const release_id = Number(process.env.RELEASE_ID);
+
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+            // Retry transient failures (network errors, 5xx, rate limits) with
+            // exponential backoff so a momentary GitHub blip does not abort the
+            // whole upload and leave the release partially populated.
+            async function withRetry(label, fn, attempts = 5) {
+              for (let i = 1; ; i++) {
+                try {
+                  return await fn();
+                } catch (e) {
+                  const transient = !e.status || e.status >= 500 || e.status === 429;
+                  if (i >= attempts || !transient) throw e;
+                  const delay = Math.min(30000, 1000 * 2 ** (i - 1));
+                  core.warning(`${label} failed (attempt ${i}/${attempts}): ${e.message}. Retrying in ${delay}ms`);
+                  await sleep(delay);
+                }
               }
             }
+
+            const files = fs.readdirSync('./artifact').filter((f) => f.endsWith('.zip') || f.endsWith('.tar.xz'));
+            const wanted = new Set(files);
+
+            // Reconcile existing release assets against what this run decided to
+            // publish: drop anything not fully uploaded (a broken partial upload)
+            // and anything not in the current file set. The latter case matters
+            // because the release is reused across runs against the same tag —
+            // if a family was complete and published in an earlier run but this
+            // run finds it incomplete and drops it locally, its assets from that
+            // earlier run would otherwise linger and make the family look
+            // complete even though this run couldn't reproduce it.
+            const existing = new Set();
+            for (const a of await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id })) {
+              if (a.state === 'uploaded' && wanted.has(a.name)) {
+                existing.add(a.name);
+              } else {
+                const reason = a.state !== 'uploaded' ? `incomplete (${a.state})` : 'stale (not part of this run)';
+                core.warning(`deleting ${reason} asset ${a.name}`);
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
+              }
+            }
+
+            let uploaded = 0;
+            let skipped = 0;
+            for (const file of files) {
+              if (existing.has(file)) {
+                core.info(`skipping ${file} (already uploaded)`);
+                skipped++;
+                continue;
+              }
+              const data = fs.readFileSync(`./artifact/${file}`);
+              await withRetry(`upload ${file}`, () =>
+                github.rest.repos.uploadReleaseAsset({ owner, repo, release_id, name: file, data })
+                  .catch(async (e) => {
+                    if (e.status !== 422) throw e;
+                    const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id });
+                    const asset = assets.find((a) => a.name === file);
+                    if (asset?.state === 'uploaded') {
+                      core.info(`accepting ${file} (already uploaded)`);
+                      return;
+                    }
+                    if (asset) {
+                      core.warning(`deleting conflicting asset ${file} (${asset.state})`);
+                      await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id });
+                      throw new Error(`retrying upload for ${file} after deleting conflicting asset`);
+                    }
+                    throw e;
+                  }));
+              core.info(`uploaded ${file}`);
+              uploaded++;
+            }
+
+            core.info(`Done: ${uploaded} uploaded, ${skipped} already present, ${files.length} total.`);
+
+      - name: Fail if any artifacts were missing
+        if: steps.check_artifacts.outputs.missing != '0'
+        run: |
+          echo "::error::${{ steps.check_artifacts.outputs.missing }} artifact(s) were missing (${{ steps.check_artifacts.outputs.summary }}) — the incomplete families were dropped from this release; other families were still published. See the 'Check release artifacts' step for the full per-file list."
+          exit 1
