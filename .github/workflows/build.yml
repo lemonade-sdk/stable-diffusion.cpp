@@ -192,7 +192,33 @@ jobs:
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
-          sudo apt-get install -y cuda-toolkit-12-9 cmake ninja-build patchelf
+          # The cuda-toolkit-12-9 metapackage is ~3.9 GB of archives and drags
+          # in Nsight, cuFFT, cuSPARSE, cuSOLVER and NPP, none of which
+          # ggml-cuda links or this workflow ships. Install just what the Build
+          # and Bundle steps consume (~1.2 GB): nvcc, cudart-dev (also supplies
+          # the libcuda stub behind CUDA::cuda_driver), cccl for thrust/cub,
+          # cublas, and the curand/nvjitlink libs the bundle step copies.
+          sudo apt-get install -y \
+            cuda-nvcc-12-9 \
+            cuda-cudart-dev-12-9 \
+            cuda-cccl-12-9 \
+            libcublas-dev-12-9 \
+            libcurand-dev-12-9 \
+            libnvjitlink-dev-12-9 \
+            cmake ninja-build patchelf
+
+          # Fail here, naming the missing file, rather than partway through the
+          # compile if NVIDIA repackages any of the above.
+          for f in /usr/local/cuda/bin/nvcc \
+                   /usr/local/cuda/include/cublas_v2.h \
+                   /usr/local/cuda/include/cub/cub.cuh \
+                   /usr/local/cuda/lib64/libcudart.so \
+                   /usr/local/cuda/lib64/libcublas.so \
+                   /usr/local/cuda/lib64/libcublasLt.so \
+                   /usr/local/cuda/lib64/libcurand.so \
+                   /usr/local/cuda/lib64/libnvJitLink.so; do
+            [ -e "$f" ] || { echo "::error::CUDA install is missing $f"; exit 1; }
+          done
 
       - name: Set CUDA environment
         run: |
@@ -247,7 +273,7 @@ jobs:
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          tar -cJf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz -C ./build/bin .
+          tar -I 'xz -T0' -cf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz -C ./build/bin .
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
@@ -376,7 +402,27 @@ jobs:
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
-          sudo apt-get install -y cuda-toolkit-12-9 cmake ninja-build patchelf
+          # See the x64 job above for why this is a hand-picked subset rather
+          # than the cuda-toolkit-12-9 metapackage.
+          sudo apt-get install -y \
+            cuda-nvcc-12-9 \
+            cuda-cudart-dev-12-9 \
+            cuda-cccl-12-9 \
+            libcublas-dev-12-9 \
+            libcurand-dev-12-9 \
+            libnvjitlink-dev-12-9 \
+            cmake ninja-build patchelf
+
+          for f in /usr/local/cuda/bin/nvcc \
+                   /usr/local/cuda/include/cublas_v2.h \
+                   /usr/local/cuda/include/cub/cub.cuh \
+                   /usr/local/cuda/lib64/libcudart.so \
+                   /usr/local/cuda/lib64/libcublas.so \
+                   /usr/local/cuda/lib64/libcublasLt.so \
+                   /usr/local/cuda/lib64/libcurand.so \
+                   /usr/local/cuda/lib64/libnvJitLink.so; do
+            [ -e "$f" ] || { echo "::error::CUDA install is missing $f"; exit 1; }
+          done
 
       - name: Set CUDA environment
         run: |
@@ -429,7 +475,7 @@ jobs:
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          tar -cJf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-arm64.tar.xz -C ./build/bin .
+          tar -I 'xz -T0' -cf sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-arm64.tar.xz -C ./build/bin .
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
@@ -488,6 +534,14 @@ jobs:
           & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.16
+        with:
+          key: windows-cmake-${{ matrix.build }}
+          variant: ccache
+          evict-old-files: 1d
+          max-size: ${{ matrix.build == 'cuda12' && '2G' || '500M' }}
 
       - name: Activate MSVC environment
         id: msvc_dev_cmd
