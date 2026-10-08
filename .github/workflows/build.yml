@@ -608,9 +608,13 @@ jobs:
   windows-latest-rocm:
     runs-on: windows-2022
 
-    env:
-      ROCM_VERSION: "10.0.0"
-      gpu_targets: "gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+    strategy:
+      matrix:
+        include:
+          - ROCM_VERSION: "10.0.0"
+            gpu_targets: "gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+          - ROCM_VERSION: "10.1.0"
+            gpu_targets: "gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
 
     steps:
       - name: Clone
@@ -636,12 +640,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\TheRock\build
-          key: rocm-wheels-${{ env.ROCM_VERSION }}-${{ runner.os }}
+          key: rocm-wheels-${{ matrix.ROCM_VERSION }}-${{ runner.os }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
         with:
-          key: windows-rocm-${{ env.ROCM_VERSION }}-x64
+          key: windows-rocm-${{ matrix.ROCM_VERSION }}-x64
           evict-old-files: 1d
 
       - name: Install ROCm with Wheels
@@ -660,7 +664,7 @@ jobs:
 
           write-host "Installing ROCm wheels for multi-arch support"
           # Install ROCm wheels for multi-arch support (this may take several minutes)
-          python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel]"
+          python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel]==${{ matrix.ROCM_VERSION }}"
 
           # Pre-expand the devel tree so it is included in the cache
           write-host "Initializing ROCm devel tree"
@@ -714,7 +718,7 @@ jobs:
             -DCMAKE_HIP_COMPILER="${env:HIP_PATH}\lib\llvm\bin\clang.exe" `
             -DHIP_PATH="${env:HIP_PATH}" `
             -DCMAKE_BUILD_TYPE=Release `
-            -DGPU_TARGETS="${{ env.GPU_TARGETS }}"
+            -DGPU_TARGETS="${{ matrix.gpu_targets }}"
           cmake --build . --config Release --parallel ${env:NUMBER_OF_PROCESSORS}
 
       - name: Get commit hash
@@ -737,15 +741,15 @@ jobs:
       - name: Pack artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
-          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ env.ROCM_VERSION }}-x64.zip .\build\bin\*
+          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip .\build\bin\*
 
       - name: Upload artifacts
         if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ env.ROCM_VERSION }}-x64.zip
+          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip
           path: |
-            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ env.ROCM_VERSION }}-x64.zip
+            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip
 
   ubuntu-latest-rocm:
     runs-on: ubuntu-24.04
@@ -757,6 +761,9 @@ jobs:
       matrix:
         include:
           - ROCM_VERSION: "10.0.0"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            build: 'x64'
+          - ROCM_VERSION: "10.1.0"
             gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
             build: 'x64'
 
@@ -820,7 +827,7 @@ jobs:
           # libraries = HIP runtime and CMake configs needed for linking
           # devel = compilers, headers, static libs
           python -m pip install --upgrade pip
-          python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel]"
+          python -m pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel]==${{ matrix.ROCM_VERSION }}"
 
           # Get ROCm installation paths using the rocm-sdk CLI tool
           ROCM_PATH=$(rocm-sdk path --root)
@@ -1081,12 +1088,15 @@ jobs:
           cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-sm_121-arm64.tar.xz")
           check_family cuda "${cuda_patterns[@]}"
 
-          # TheRock nightly ROCm 7.14.0 (windows-latest-rocm + the 7.14.0 leg
-          # of ubuntu-latest-rocm). Kept separate from the HIP SDK line below
-          # since they're different SDKs, not just different platforms.
-          check_family rocm-therock \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-win-rocm-7.14.0-x64.zip" \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-Ubuntu-24.04-x86_64-rocm-7.14.0.zip"
+          # TheRock ROCm: every version leg of windows-latest-rocm and ubuntu-latest-rocm.
+          # This list shoudl be kept in sync with the job matrices because
+          # Lemonade selects a leg by its `therock.version` pin, so a release that drops one leg silently breaks that pin. 
+          rocm_patterns=()
+          for rocm_ver in 10.0.0 10.1.0; do
+            rocm_patterns+=("artifact/sd-${BRANCH}-${SHORT}-bin-win-rocm-${rocm_ver}-x64.zip")
+            rocm_patterns+=("artifact/sd-${BRANCH}-${SHORT}-bin-Linux-Ubuntu-24.04-x86_64-rocm-${rocm_ver}.zip")
+          done
+          check_family rocm-therock "${rocm_patterns[@]}"
 
           # CPU: ubuntu-latest-cmake's filename embeds the runner's OS name/
           # version via lsb_release, so it's wildcarded rather than pinned.
