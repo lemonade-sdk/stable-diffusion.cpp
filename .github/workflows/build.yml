@@ -28,7 +28,9 @@ concurrency:
 
 jobs:
   ubuntu-latest-cmake:
-    runs-on: ubuntu-latest
+    # Pinned: Lemonade expects Ubuntu-24.04 asset names, and binaries built on
+    # newer Ubuntu need a newer glibc than 24.04 and Debian 13 provide.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Clone
@@ -92,7 +94,8 @@ jobs:
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
   ubuntu-latest-cmake-vulkan:
-    runs-on: ubuntu-latest
+    # Pinned for the same reason as ubuntu-latest-cmake.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Clone
@@ -923,8 +926,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            label: macos-14
           - os: macos-latest
             label: macos-latest
     runs-on: ${{ matrix.os }}
