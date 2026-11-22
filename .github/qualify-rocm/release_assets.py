@@ -2,13 +2,30 @@
 """
 Which release assets make up each backend family, and whether a family is complete.
 
-Each family ships as a complete set or not at all; families are independent,
-and each ROCm version is its own family (Windows + Linux must both be present).
+A family is a set of archives that only makes sense together: all eight CUDA
+architectures on every platform, the CPU builds for Linux and Windows, and so
+on. Each family ships as a complete set or not at all, so a consumer never
+finds half of one. Families are independent of each other, and each ROCm
+version is a family of its own -- a consumer downloads exactly one ROCm
+version, so a gap in 10.2 is no reason to withhold a good 10.0. What must stay
+together is the Windows + Linux pair within a version.
 
-  check-dir      drop every incomplete family from a folder of built artifacts
-  check-release  report whether an existing release already holds every family
+The rules live here, in one place, because two jobs need them:
+
+  check-dir      the release job: drop every incomplete family from the folder
+                 of built artifacts before anything is uploaded. Exits non-zero
+                 only when nothing at all is left to publish.
+  check-release  the resolve-upstream job, on a nightly: does the release for
+                 this tag already hold every family (and checksums.txt)? If so,
+                 the nightly has nothing to add and skips the whole build.
 
 Keep the lists in step with the build matrices in build.yml.
+
+Usage:
+    python3 release_assets.py check-dir --dir artifact --branch master \
+        --short abc1234 --rocm-versions 10.0,10.1,10.2
+    python3 release_assets.py check-release --names-file assets.txt --branch master \
+        --short abc1234 --rocm-versions 10.0,10.1,10.2
 """
 
 import argparse
@@ -86,7 +103,7 @@ def check_release(args, fams):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    parser = argparse.ArgumentParser(description="Check which backend families are complete")
     parser.add_argument("mode", choices=["check-dir", "check-release"])
     parser.add_argument("--branch", required=True)
     parser.add_argument("--short", required=True, help="fork commit in the asset names")

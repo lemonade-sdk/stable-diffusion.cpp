@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """
-Shared reporting for the ROCm qualification suite.
+Shared reporting for the ROCm build-qualification suite.
 
-Each tier writes a JSON fragment; aggregate.py merges the fragments for one
-archive into the qualification record attached to the release. A test id keeps
-its meaning forever and is never reused.
+Every tier emits a JSON *fragment* with an identical schema; `aggregate.py`
+merges the fragments for one artifact into a single qualification record that
+is attached to the GitHub release.
+
+The schema is deliberately flat and stable so a dashboard could consume it
+later without reshaping:
+
+  - Every test has a stable `id` ("T0.3", "T1.2") that never changes meaning.
+  - `status` is always one of the STATUS_* values below.
+  - Numbers live under `details` as numbers, never strings.
+  - `gating` says whether a FAIL blocks the ROCm family from the release.
+
+This module is stdlib-only: Tier 1 runs on self-hosted machines where nothing
+is installed but ROCm itself.
 """
 
 import datetime
@@ -31,6 +42,7 @@ TIER_NAMES = {
 
 
 def now_iso():
+    """Current UTC time as an ISO-8601 string with a trailing 'Z'."""
     return (
         datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
@@ -40,12 +52,16 @@ def now_iso():
 
 
 def short_version(version):
-    """'10.1.0' -> '10.1', the form records and the feed use."""
+    """'10.1.0' -> '10.1': the ROCm version as records and the feed write it.
+
+    Release asset names carry the full version, the dashboard's ROCm tracks the
+    short one, so every record stores the short form.
+    """
     return ".".join(str(version).split(".")[:2]) if version else version
 
 
 def test_order(test_id):
-    """Sort "T0.10" after "T0.9", and unknown ids last."""
+    """Sort "T0.10" after "T0.9", and unknown ids after known ones."""
     match = re.match(r"^T(\d+)\.(\d+)$", test_id or "")
     if match:
         return (int(match.group(1)), int(match.group(2)), "")
@@ -63,6 +79,11 @@ def build_meta(
     run_id=None,
     run_attempt=None,
 ):
+    """Per-artifact metadata block shared by every fragment.
+
+    `artifact` is the release asset filename, which is the only identifier a
+    user filing a bug report will have in front of them.
+    """
     build_id = artifact or "local"
     if run_id:
         build_id = f"{build_id}@{run_id}"
@@ -71,7 +92,10 @@ def build_meta(
         "artifact": artifact,
         "os": os_name,
         "rocm_version": short_version(rocm_version),
+        # The release tag, master-<upstream commit count>-<fork commit>.
         "sdcpp_tag": sdcpp_tag,
+        # The upstream stable-diffusion.cpp commit this archive was built from.
+        # Pinned once per run, so every artifact in a release reports the same one.
         "upstream_sha": upstream_sha,
         "gfx_target": gfx_target,
         "hardware_validated": bool(hardware_validated),
@@ -81,6 +105,8 @@ def build_meta(
 
 
 class TierReport:
+    """Collects test results for one tier and serializes a JSON fragment."""
+
     def __init__(self, tier, meta):
         if tier not in TIER_NAMES:
             raise ValueError(f"unknown tier {tier!r}")
@@ -92,6 +118,7 @@ class TierReport:
 
     def add(self, test_id, name, status, gating=True, duration_ms=None,
             error=None, details=None):
+        """Record a single test result."""
         if status not in _SEVERITY:
             raise ValueError(f"invalid status {status!r}")
         self.tests.append({
@@ -107,9 +134,12 @@ class TierReport:
         return status
 
     def run(self, test_id, name, fn, gating=True):
-        """Run a check; `fn` returns status, (status, error) or (status, error, details).
+        """Run a check function, timing it and trapping exceptions.
 
-        An exception is recorded as FAIL so one broken check never hides the others.
+        `fn` returns a status string, or (status, error), or
+        (status, error, details). A raised exception is recorded as a FAIL with
+        the traceback in details, so one broken check never aborts the tier --
+        we always want the full picture of a bad build in one run.
         """
         start = time.monotonic()
         try:
@@ -120,7 +150,7 @@ class TierReport:
                 (status, error), details = result, None
             else:
                 status, error, details = result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - capture everything
             status = STATUS_FAIL
             error = f"{type(exc).__name__}: {exc}"
             details = {"traceback": traceback.format_exc()}
@@ -129,6 +159,7 @@ class TierReport:
                         duration_ms=duration_ms, error=error, details=details)
 
     def status_of(self, test_id):
+        """Status of a recorded test, or None if it was not recorded."""
         return next((t["status"] for t in self.tests if t["id"] == test_id), None)
 
     def counts(self):
@@ -139,10 +170,12 @@ class TierReport:
         return out
 
     def rollup_status(self):
-        """Worst status among gating tests."""
+        """Tier status = worst severity among *gating* tests."""
         worst = STATUS_PASS
         for test in self.tests:
-            if test["gating"] and _SEVERITY[test["status"]] > _SEVERITY[worst]:
+            if not test["gating"]:
+                continue
+            if _SEVERITY[test["status"]] > _SEVERITY[worst]:
                 worst = test["status"]
         return worst
 
@@ -161,13 +194,16 @@ class TierReport:
         }
 
     def write(self, path):
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(self.to_dict(), handle, indent=2)
             handle.write("\n")
 
     def print_summary(self):
-        print(f"\n=== {self.tier} ({TIER_NAMES[self.tier]}): {self.rollup_status().upper()} ===")
+        """Human-readable summary to stdout (the CI log)."""
+        rollup = self.rollup_status()
+        print(f"\n=== {self.tier} ({TIER_NAMES[self.tier]}): {rollup.upper()} ===")
         for test in sorted(self.tests, key=lambda t: test_order(t["id"])):
             gate = "" if test["gating"] else " (non-gating)"
             line = f"  [{test['status'].upper()}] {test['id']} {test['name']}{gate}"
@@ -180,11 +216,13 @@ class TierReport:
 
 
 def merge_fragments(fragments, extra_meta=None):
-    """Merge the per-tier fragments of one archive into one record."""
+    """Merge per-tier fragments for one artifact into one record."""
     fragments = sorted(fragments, key=lambda frag: frag.get("tier", ""))
     meta = {}
     for frag in fragments:
         for key, value in frag.get("build", {}).items():
+            # Never let a tier that did not touch hardware clear the flag a
+            # tier that did has already set.
             if key == "hardware_validated":
                 meta[key] = bool(meta.get(key)) or bool(value)
             elif value is not None or key not in meta:
@@ -194,7 +232,8 @@ def merge_fragments(fragments, extra_meta=None):
 
     tiers = {}
     for frag in fragments:
-        bucket = tiers.setdefault(frag["tier"], {
+        tier = frag["tier"]
+        bucket = tiers.setdefault(tier, {
             "status": STATUS_SKIP,
             "tier_name": frag.get("tier_name"),
             "counts": {},
@@ -202,16 +241,19 @@ def merge_fragments(fragments, extra_meta=None):
         })
         seen = {t.get("id") for t in bucket["tests"]}
         for test in frag.get("tests", []):
+            # Identical ids from a re-run would double-count; keep the first.
             if test.get("id") in seen:
                 continue
             bucket["tests"].append(test)
             seen.add(test.get("id"))
+    # Fragments arrive in file-name order, which put the release job's
+    # post-merge checks first; list every tier's tests by id instead.
     for bucket in tiers.values():
         bucket["tests"].sort(key=lambda test: test_order(test.get("id")))
 
     overall = STATUS_PASS
     totals = {STATUS_PASS: 0, STATUS_FAIL: 0, STATUS_WARN: 0, STATUS_SKIP: 0, "total": 0}
-    for bucket in tiers.values():
+    for tier, bucket in tiers.items():
         counts = {STATUS_PASS: 0, STATUS_FAIL: 0, STATUS_WARN: 0, STATUS_SKIP: 0,
                   "total": len(bucket["tests"])}
         status = STATUS_PASS

@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 """
-T0.12 final archive integrity, run by the release job on the exact file it is
-about to upload: it reads back intact, still holds sd-server and the HIP code,
-and its SHA-256 equals the one the build job recorded -- so what ships is what
-Tier 0 and Tier 1 tested.
+Final-archive check on the exact bytes about to be uploaded. No GPU required.
+
+Runs inside the release job, after the family completeness check, which is the
+only place this question can be answered:
+
+  T0.12  final archive integrity -- the final archive opens, reads back intact
+         (every entry's CRC-32 is checked), still contains sd-server and the
+         file holding the GPU code, and is the archive the build job produced
+         and the qualify jobs tested: its SHA-256 must match the one the build
+         job recorded in qualify-meta-<os>-rocm-<ver>.json.
+
+This is what makes "what is built is what is tested" hold. Tier 0 and Tier 1
+download the build job's artifact by name; the release job downloads it again
+and uploads it under the same name, never repacking or merging anything into
+it. If any step in between ever changed the bytes -- a re-pack, a merge, a
+corrupted transfer -- the SHA-256 would no longer match and the archive's ROCm
+version would be withheld. (lemonade-sdk/llama.cpp calls the same check T0.11,
+in check_post_merge.py.)
+
+The file is opened inside the check, so an archive that cannot be read is
+recorded as a FAIL instead of crashing the script and leaving no result.
 
 Usage:
     python3 check_final.py --archive artifact/sd-master-abc1234-bin-win-rocm-10.1.0-x64.zip \

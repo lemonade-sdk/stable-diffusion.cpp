@@ -870,13 +870,13 @@ jobs:
       matrix:
         include:
           - ROCM_VERSION: "10.0.0"
-            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
             build: 'x64'
           - ROCM_VERSION: "10.1.0"
-            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
             build: 'x64'
           - ROCM_VERSION: "10.2.0"
-            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
             build: 'x64'
 
     steps:
@@ -1664,11 +1664,13 @@ jobs:
 
   # Publishes every run's ROCm qualification records, passing or failing, to the
   # qualification-data branch the ROCm readiness dashboard reads (format: .github/qualify-rocm/FEED.md).
-  # The branch is created on the first publish.
+  # A nightly skipped because its release was already complete records only that it
+  # checked and found nothing new (index.json "last_check"). The branch is created on the first publish.
   publish-qualification:
     if: >-
       ${{ always() && needs.resolve-upstream.result == 'success' &&
-          (needs.release.result == 'success' || needs.release.result == 'failure') }}
+          (needs.resolve-upstream.outputs.skip == 'true' ||
+           needs.release.result == 'success' || needs.release.result == 'failure') }}
     needs:
       - resolve-upstream
       - release
@@ -1686,6 +1688,7 @@ jobs:
           path: lemonade-ci
 
       - name: Download qualification records
+        if: needs.resolve-upstream.outputs.skip != 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -1693,6 +1696,7 @@ jobs:
           path: ./records
 
       - name: Download qualification fragments
+        if: needs.resolve-upstream.outputs.skip != 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -1702,6 +1706,7 @@ jobs:
 
       # If the release job stopped before writing records, build them from the tier reports.
       - name: Collect qualification records
+        if: needs.resolve-upstream.outputs.skip != 'true'
         env:
           TAG: ${{ needs.resolve-upstream.outputs.tag }}
         run: |
@@ -1723,6 +1728,7 @@ jobs:
             --rocm-versions "$ROCM_VERSIONS"
 
       - name: Read build job results
+        if: needs.resolve-upstream.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1747,6 +1753,7 @@ jobs:
           UPSTREAM_SHA: ${{ needs.resolve-upstream.outputs.sha }}
           PUBLISHED_ROCM: ${{ needs.release.outputs.published_rocm }}
           FINAL_CHECKED: ${{ needs.release.outputs.final_checked }}
+          UNCHANGED: ${{ needs.resolve-upstream.outputs.skip }}
         run: |
           set -euo pipefail
           git config --global user.name "github-actions[bot]"
@@ -1772,16 +1779,21 @@ jobs:
               echo "Could not reach the repository (attempt $attempt); retrying"; sleep $((attempt * 3)); continue
             fi
 
-            python3 lemonade-ci/.github/qualify-rocm/publish_qualification.py \
-              --records-dir records \
-              --data-dir data/qualification \
-              --operating-systems "$ROCM_OPERATING_SYSTEMS" \
-              --rocm-versions "$ROCM_VERSIONS" \
-              --tag "$TAG" \
-              --upstream-sha "$UPSTREAM_SHA" \
-              --jobs-file jobs.jsonl \
-              --published-artifacts "$PUBLISHED_ROCM" \
-              --final-checked "$FINAL_CHECKED"
+            if [ "$UNCHANGED" = "true" ]; then
+              python3 lemonade-ci/.github/qualify-rocm/publish_qualification.py --mark-unchanged \
+                --data-dir data/qualification --tag "$TAG" --upstream-sha "$UPSTREAM_SHA"
+            else
+              python3 lemonade-ci/.github/qualify-rocm/publish_qualification.py \
+                --records-dir records \
+                --data-dir data/qualification \
+                --operating-systems "$ROCM_OPERATING_SYSTEMS" \
+                --rocm-versions "$ROCM_VERSIONS" \
+                --tag "$TAG" \
+                --upstream-sha "$UPSTREAM_SHA" \
+                --jobs-file jobs.jsonl \
+                --published-artifacts "$PUBLISHED_ROCM" \
+                --final-checked "$FINAL_CHECKED"
+            fi
             cp lemonade-ci/.github/qualify-rocm/FEED.md data/qualification/SCHEMA.md
 
             git -C data add -A
@@ -1789,7 +1801,8 @@ jobs:
               echo "Nothing changed; the feed already holds this run."
               pushed=1; break
             fi
-            git -C data commit --quiet -m "qualification: run ${{ github.run_id }} (${TAG})"
+            if [ "$UNCHANGED" = "true" ]; then message="unchanged"; else message="run"; fi
+            git -C data commit --quiet -m "qualification: ${message} ${{ github.run_id }} (${TAG})"
             if git -C data push --quiet origin "$BRANCH"; then
               pushed=1; break
             fi

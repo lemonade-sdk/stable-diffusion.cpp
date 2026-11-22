@@ -3,6 +3,17 @@
 Write the release notes from the assets actually attached to the release, so a
 family that was withheld gets no link and is listed under "Not in this release".
 
+The layout follows lemonade-sdk/llama.cpp's release notes: the summary in an
+open <details> block, then a table per Linux architecture (package, the oldest
+Ubuntu it starts on, download links), a list for Windows, and a list for macOS.
+
+The notes are written AFTER the upload, from the release's real asset list,
+rather than from the files this run meant to upload. A nightly may be filling
+the gaps of an earlier, incomplete run of the same tag, so the release can hold
+files this run did not build; and a ROCm version is only linked when both its
+Windows and Linux archives are attached, because it ships as a pair or not at
+all.
+
 Usage:
     python3 release_notes.py --tag master-1106-abc1234 --repo lemonade-sdk/stable-diffusion.cpp \
         --assets-file assets.txt --rocm-versions 10.0,10.1,10.2 --summary "..." --output notes.md

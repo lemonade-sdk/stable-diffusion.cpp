@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Unpack a published ROCm archive the way a user's unzip would."""
+"""
+Unpack a published ROCm archive the way a user's unzip would.
+
+Both Tier 0 and Tier 1 need the archive's files on disk, and the two operating
+systems pack them differently: the Windows zip is flat, while the Linux zip
+holds build/bin/ with its versioned library names stored as symlinks. Rather
+than encode either layout, extract() returns whichever folder sd-server landed
+in -- the same thing Lemonade does when it searches the extracted folder for
+sd-server.
+
+Every entry is checked to stay inside the destination, so a damaged or hostile
+archive cannot write anywhere else.
+"""
 
 import os
 import stat
