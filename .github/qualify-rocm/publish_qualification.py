@@ -164,12 +164,15 @@ def load_build_results(jobs_file):
     return results
 
 
-def make_build_id(run_id, os_name, rocm_version):
+def make_build_id(run_id, os_name, rocm_version, attempt=None):
+    """"<run_id>-<os>-rocm-<ver>", or "<run_id>.<attempt>-..." for a re-run that
+    built a different tag than the rows already published for that run."""
     if not (run_id and os_name and rocm_version):
         raise SystemExit(
             f"::error::cannot form a build_id from run_id={run_id!r} os={os_name!r} "
             f"rocm_version={rocm_version!r}")
-    build_id = f"{run_id}-{os_name}-rocm-{rocm_version}"
+    run = f"{run_id}.{attempt}" if attempt else str(run_id)
+    build_id = f"{run}-{os_name}-rocm-{rocm_version}"
     if not _SAFE_ID.match(build_id):
         raise SystemExit(f"::error::refusing unsafe build_id {build_id!r}")
     return build_id
@@ -472,12 +475,21 @@ def main():
     # shipped already in the release and cannot replace them. Its own record then
     # describes rebuilt bytes that never shipped, so the earlier attempt's row and
     # report -- which describe what users actually download -- are kept instead.
-    shipped = {b.get("build_id"): b for b in read_index(index_path).get("builds", [])
-               if b.get("published")}
+    existing = {b.get("build_id"): b for b in read_index(index_path).get("builds", [])}
+    shipped = {k: b for k, b in existing.items() if b.get("published")}
 
     entries = []
     for record, build_id, is_placeholder in items:
         build = record["build"]
+        # "Re-run all jobs" re-resolves upstream, so a re-run can build a new tag
+        # under the same run_id. Its rows then get their own build_id, so the rows
+        # of the tag the earlier attempt built (and maybe shipped) are not lost.
+        previous = existing.get(build_id)
+        if previous and previous.get("tag") != build.get("sdcpp_tag") and run_attempt:
+            build_id = make_build_id(build.get("run_id") or args.run_id, build.get("os"),
+                                     build.get("rocm_version"), run_attempt)
+            print(f"{build_id}: re-run built tag {build.get('sdcpp_tag')}, not "
+                  f"{previous.get('tag')}; published as separate rows")
         # Same tag only: a re-run of all jobs re-resolves upstream, and a new tag
         # is a different build whose result must not be hidden.
         old = shipped.get(build_id)

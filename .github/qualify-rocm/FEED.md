@@ -64,7 +64,11 @@ therefore always has six rows.
 
 ```
 build_id = "<run_id>-<os>-rocm-<rocm_version>"     e.g. 45012345678-win-rocm-10.1
+build_id = "<run_id>.<attempt>-<os>-rocm-<rocm_version>"   e.g. 45012345678.2-win-rocm-10.1
 ```
+
+The second form is used only for a re-run that built a different tag than the
+rows already in the feed for that run (see below).
 
 Unique per archive per run. Publishing is an upsert keyed on `build_id`. A
 re-run of a run keeps its `run_id`, so it replaces that run's rows and its
@@ -75,6 +79,12 @@ published asset), the earlier attempt's row and report are kept, because they
 describe the bytes users actually download. This needs the earlier attempt's
 own feed publish to have succeeded; if it did not, the re-run's row is
 published with `published: false`.
+
+"Re-run all jobs" resolves upstream again, so if upstream moved in the
+meantime the re-run builds a different tag (and, if it passes, a new release).
+Its rows then use `<run_id>.<attempt>-…` instead of replacing the rows of the
+tag the earlier attempt built, so both stay in `index.json`. "Re-run failed
+jobs" keeps the earlier attempt's resolved commit, so it never changes the tag.
 `run_attempt` records which attempt published the rows. A new run has a new
 `run_id` and adds new rows.
 

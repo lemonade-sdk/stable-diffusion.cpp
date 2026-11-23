@@ -111,8 +111,10 @@ def render(tag, repo, names, rocm_versions, summary):
             *(["**Windows x64**", *windows, ""] if windows else []),
             *(["**macOS arm64**", f"- Metal: {link('download', metal)}", ""] if metal else [])]
     if paired:
-        body += ["ROCm packages need the ROCm runtime of the same version "
-                 "(`rocm[libraries]` from TheRock); Lemonade installs it automatically.", ""]
+        body += [f"ROCm packages need the ROCm runtime of the same version, installed "
+                 f"separately: see [Using the ROCm builds](https://github.com/{repo}"
+                 f"#using-the-rocm-builds). [Lemonade](https://github.com/lemonade-sdk/lemonade) "
+                 f"installs it automatically.", ""]
     if missing:
         body += ["**Not in this release**", *missing]
     return "\n".join(body).rstrip() + "\n"
