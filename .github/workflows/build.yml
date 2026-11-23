@@ -12,12 +12,16 @@ on:
   pull_request: # validate the release build on PRs; the release job is skipped so nothing is published
     paths:
       # The build jobs clone stable-diffusion.cpp source from upstream
-      # (leejet/stable-diffusion.cpp), so only changes to this workflow itself
-      # can affect the outcome of a PR run. Scope PR runs to it.
+      # (leejet/stable-diffusion.cpp), so only this workflow and the ROCm
+      # qualification suite can affect the outcome of a PR run.
       - '.github/workflows/build.yml'
+      - '.github/qualify-rocm/**'
 
 env:
   BRANCH_NAME: master
+  # The ROCm archives every run should produce. Keep in step with the ROCm build and qualify matrices.
+  ROCM_VERSIONS: "10.0,10.1,10.2"
+  ROCM_OPERATING_SYSTEMS: "ubuntu,win"
 
 permissions:
   contents: read
@@ -27,7 +31,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Pins one upstream commit for the whole run, so a push upstream mid-run cannot put two revisions under one tag.
+  resolve-upstream:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      short: ${{ steps.resolve.outputs.short }}
+      skip: ${{ steps.published.outputs.complete == 'true' }}
+    steps:
+      - name: Clone
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          repository: 'leejet/stable-diffusion.cpp'
+          path: upstream
+
+      - name: Checkout qualification suite
+        uses: actions/checkout@v6
+        with:
+          path: lemonade-ci
+
+      - name: Resolve commit and tag
+        id: resolve
+        run: |
+          sha=$(git -C upstream rev-parse HEAD)
+          short=${GITHUB_SHA::7}
+          tag="${BRANCH_NAME}-$(git -C upstream rev-list --count HEAD)-${short}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Pinning this run to upstream $sha ($tag)"
+
+      # The tag only changes when upstream or this fork changes, so a nightly on unchanged
+      # sources would rebuild a release that already exists. Skip it when that release
+      # already holds every family; rebuild to fill the gaps when it does not.
+      - name: Check whether this tag is already fully published
+        id: published
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          SHORT: ${{ steps.resolve.outputs.short }}
+        run: |
+          if gh release view "$TAG" -R "${{ github.repository }}" --json assets \
+              --jq '.assets[] | select(.state == "uploaded") | .name' > assets.txt; then
+            python3 lemonade-ci/.github/qualify-rocm/release_assets.py check-release \
+              --branch "$BRANCH_NAME" --short "$SHORT" --rocm-versions "$ROCM_VERSIONS" --names-file assets.txt
+          else
+            echo "No complete release $TAG yet; building it."
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
   ubuntu-latest-cmake:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     # Pinned: Lemonade expects Ubuntu-24.04 asset names, and binaries built on
     # newer Ubuntu need a newer glibc than 24.04 and Debian 13 provide.
     runs-on: ubuntu-24.04
@@ -39,6 +97,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -94,6 +153,8 @@ jobs:
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
   ubuntu-latest-cmake-vulkan:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     # Pinned for the same reason as ubuntu-latest-cmake.
     runs-on: ubuntu-24.04
 
@@ -104,6 +165,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -159,6 +221,8 @@ jobs:
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-vulkan.zip
 
   ubuntu-latest-cuda:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     runs-on: ubuntu-22.04
 
     strategy:
@@ -175,7 +239,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
-          ref: master
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -286,6 +350,8 @@ jobs:
           path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-x64.tar.xz
 
   windows-latest-cuda:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     runs-on: windows-2022
 
     strategy:
@@ -302,7 +368,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
-          ref: master
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: Install CUDA Toolkit
         id: cuda-toolkit
@@ -376,6 +442,8 @@ jobs:
           path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-windows-cuda-${{ matrix.sm }}-x64.zip
 
   ubuntu-arm64-cuda:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     # GB10 (sm_121) ARM64 Linux build
     runs-on: ubuntu-24.04-arm
 
@@ -392,7 +460,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
-          ref: master
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -488,12 +556,16 @@ jobs:
           path: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-ubuntu-cuda-${{ matrix.sm }}-arm64.tar.xz
 
   windows-latest-cmake:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     runs-on: windows-2022
 
     env:
       VULKAN_VERSION: 1.4.328.1
 
     strategy:
+      # Each build is published as its own family, so one failing must not cancel the others.
+      fail-fast: false
       matrix:
         include:
           - build: "cpu"
@@ -509,6 +581,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -609,6 +682,8 @@ jobs:
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-${{ matrix.build }}-x64.zip
 
   windows-latest-rocm:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     runs-on: windows-2022
 
     strategy:
@@ -631,6 +706,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -728,13 +804,8 @@ jobs:
             -DGPU_TARGETS="${{ matrix.gpu_targets }}"
           cmake --build . --config Release --parallel ${env:NUMBER_OF_PROCESSORS}
 
-      - name: Get commit hash
-        id: commit
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
-        uses: pr-mpt/actions-commit-hash@v2
-
+      # Packed on every event, pull requests included, so the qualify jobs can test the archive.
       - name: Bundle HIP runtime libraries
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           $ErrorActionPreference = "Stop"
           $binPath = (rocm-sdk path --bin).Trim()
@@ -746,19 +817,50 @@ jobs:
           }
 
       - name: Pack artifacts
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
-          7z a sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip .\build\bin\*
+          Copy-Item ggml/LICENSE .\build\bin\ggml.txt
+          Copy-Item LICENSE .\build\bin\stable-diffusion.cpp.txt
+          7z a sd-${{ env.BRANCH_NAME }}-${{ needs.resolve-upstream.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip .\build\bin\*
+
+      # The qualify jobs audit the archive against this job's own gpu_targets, and the
+      # release job proves with the SHA-256 that it uploads the archive they tested (T0.12).
+      - name: Record qualification metadata
+        run: |
+          $archive = 'sd-${{ env.BRANCH_NAME }}-${{ needs.resolve-upstream.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip'
+          $short = ('${{ matrix.ROCM_VERSION }}'.Split('.')[0..1] -join '.')
+          $meta = [ordered]@{
+            os                = 'win'
+            rocm_version      = $short
+            rocm_version_full = '${{ matrix.ROCM_VERSION }}'
+            gpu_targets       = '${{ matrix.gpu_targets }}'
+            tag               = '${{ needs.resolve-upstream.outputs.tag }}'
+            upstream_sha      = '${{ needs.resolve-upstream.outputs.sha }}'
+            artifact          = $archive
+            sha256            = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
+          }
+          $path = "qualify-meta-win-rocm-$short.json"
+          $meta | ConvertTo-Json | Set-Content -Path $path -Encoding utf8
+          Get-Content $path
+          echo "ROCM_VERSION_SHORT=$short" >> $env:GITHUB_ENV
 
       - name: Upload artifacts
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip
+          name: sd-${{ env.BRANCH_NAME }}-${{ needs.resolve-upstream.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip
           path: |
-            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip
+            sd-${{ env.BRANCH_NAME }}-${{ needs.resolve-upstream.outputs.short }}-bin-win-rocm-${{ matrix.ROCM_VERSION }}-x64.zip
+          retention-days: ${{ github.event_name == 'pull_request' && '7' || '' }}
+
+      - name: Upload qualification metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualify-meta-win-rocm-${{ env.ROCM_VERSION_SHORT }}
+          path: qualify-meta-win-rocm-${{ env.ROCM_VERSION_SHORT }}.json
+          retention-days: ${{ github.event_name == 'pull_request' && '7' || '' }}
 
   ubuntu-latest-rocm:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     runs-on: ubuntu-24.04
 
     env:
@@ -770,13 +872,13 @@ jobs:
       matrix:
         include:
           - ROCM_VERSION: "10.0.0"
-            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
             build: 'x64'
           - ROCM_VERSION: "10.1.0"
-            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
             build: 'x64'
           - ROCM_VERSION: "10.2.0"
-            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1200;gfx1201"
+            gpu_targets: "gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
             build: 'x64'
 
     steps:
@@ -787,6 +889,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.16
@@ -807,7 +910,7 @@ jobs:
       - name: Dependencies
         id: depends
         run: |
-          sudo apt install -y build-essential git cmake wget
+          sudo apt install -y build-essential git cmake wget patchelf
 
       - name: Free disk space
         run: |
@@ -893,18 +996,16 @@ jobs:
             -DSD_BUILD_SHARED_LIBS=ON
           cmake --build . --config Release
 
-      - name: Get commit hash
-        id: commit
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
-        uses: prompt/actions-commit-hash@v2
-
-      - name: Prepare artifacts
-        id: prepare_artifacts
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
+      # The HIP link adds the pip-installed ROCm devel tree to RUNPATH
+      # (.../_rocm_sdk_devel/lib), a build-machine path that means nothing on a user's machine.
+      - name: Normalize RPATH for portable distribution
         run: |
-          # Copy licenses
-          cp ggml/LICENSE ./build/bin/ggml.txt
-          cp LICENSE ./build/bin/stable-diffusion.cpp.txt
+          for f in build/bin/*; do
+            [ -f "$f" ] && ! [ -L "$f" ] || continue
+            if file "$f" | grep -q 'ELF'; then
+              patchelf --set-rpath '$ORIGIN' "$f"
+            fi
+          done
 
       - name: Fetch system info
         id: system-info
@@ -914,23 +1015,53 @@ jobs:
           echo "OS_VERSION=`lsb_release -s -r`" >> "$GITHUB_OUTPUT"
           echo "OS_TYPE=`uname -s`" >> "$GITHUB_OUTPUT"
 
+      # Packed on every event, pull requests included, so the qualify jobs can test the archive.
       - name: Pack artifacts
         id: pack_artifacts
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         run: |
           cp ggml/LICENSE ./build/bin/ggml.txt
           cp LICENSE ./build/bin/stable-diffusion.cpp.txt
-          zip -y -r sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip ./build/bin
+          archive=sd-${{ env.BRANCH_NAME }}-${{ needs.resolve-upstream.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip
+          zip -y -r "$archive" ./build/bin
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "ROCM_VERSION_SHORT=$(echo '${{ matrix.ROCM_VERSION }}' | cut -d '.' -f 1,2)" >> "$GITHUB_ENV"
+
+      # Same as windows-latest-rocm, SHA-256 included.
+      - name: Record qualification metadata
+        env:
+          ARCHIVE: ${{ steps.pack_artifacts.outputs.archive }}
+        run: |
+          cat > "qualify-meta-ubuntu-rocm-${ROCM_VERSION_SHORT}.json" <<EOF
+          {
+            "os": "ubuntu",
+            "rocm_version": "${ROCM_VERSION_SHORT}",
+            "rocm_version_full": "${{ matrix.ROCM_VERSION }}",
+            "gpu_targets": "${{ matrix.gpu_targets }}",
+            "tag": "${{ needs.resolve-upstream.outputs.tag }}",
+            "upstream_sha": "${{ needs.resolve-upstream.outputs.sha }}",
+            "artifact": "${ARCHIVE}",
+            "sha256": "$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)"
+          }
+          EOF
+          cat "qualify-meta-ubuntu-rocm-${ROCM_VERSION_SHORT}.json"
 
       - name: Upload artifacts
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.create_release == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip
-          path: |
-            sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-Ubuntu-${{ env.UBUNTU_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}-rocm-${{ matrix.ROCM_VERSION }}.zip
+          name: ${{ steps.pack_artifacts.outputs.archive }}
+          path: ${{ steps.pack_artifacts.outputs.archive }}
+          retention-days: ${{ github.event_name == 'pull_request' && '7' || '' }}
+
+      - name: Upload qualification metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualify-meta-ubuntu-rocm-${{ env.ROCM_VERSION_SHORT }}
+          path: qualify-meta-ubuntu-rocm-${{ env.ROCM_VERSION_SHORT }}.json
+          retention-days: ${{ github.event_name == 'pull_request' && '7' || '' }}
 
   macos-arm64-cmake:
+    needs: resolve-upstream
+    if: needs.resolve-upstream.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -946,6 +1077,7 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.21
@@ -998,20 +1130,237 @@ jobs:
           path: |
             sd-${{ env.BRANCH_NAME }}-${{ steps.commit.outputs.short }}-bin-${{ steps.system-info.outputs.OS_TYPE }}-${{ steps.system-info.outputs.OS_NAME }}-${{ steps.system-info.outputs.OS_VERSION }}-${{ steps.system-info.outputs.CPU_ARCH }}.zip
 
+  # ---------------------------------------------------------------------------
+  # ROCm qualification. Each ROCm archive is checked as built.
+  # Tier 0 statically, Tier 1 by generating an image on a Strix Halo (gfx1151) GPU.
+  # The release job withholds a ROCm version unless both of its archives pass both tiers.
+  # See .github/qualify-rocm/README.md.
+  # ---------------------------------------------------------------------------
+  qualify-tier0:
+    # !cancelled(): a failed build leaves nothing to audit, and the release job reports that gap.
+    if: ${{ !cancelled() && needs.resolve-upstream.result == 'success' && needs.resolve-upstream.outputs.skip != 'true' }}
+    needs:
+      - resolve-upstream
+      - ubuntu-latest-rocm
+      - windows-latest-rocm
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each leg runs on the archive's own OS: T0.8-T0.11 run sd-server and install a user's ROCm.
+        os: [ubuntu, win]
+        rocm: ["10.0", "10.1", "10.2"]
+        include:
+          - os: ubuntu
+            runner: ubuntu-24.04
+          - os: win
+            runner: windows-2025
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout qualification suite
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Download qualification metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: qualify-meta-${{ matrix.os }}-rocm-${{ matrix.rocm }}
+          path: ./meta
+
+      - name: Name the archive
+        id: archive
+        shell: python
+        run: |
+          import json, os
+          with open("meta/qualify-meta-${{ matrix.os }}-rocm-${{ matrix.rocm }}.json", encoding="utf-8-sig") as handle:
+              name = json.load(handle)["artifact"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"name={name}\n")
+
+      - name: Download ROCm archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: ./artifact
+
+      # T0.8-T0.11 need the ROCm a user installs; this must not fail quietly or they would only skip.
+      - name: Install a user-style ROCm runtime
+        run: >-
+          python .github/qualify-rocm/install_rocm.py
+          --version ${{ matrix.rocm }}.0
+          --arch gfx1151
+
+      - name: Run Tier 0 static verification
+        run: >-
+          python .github/qualify-rocm/tier0_static.py
+          --meta meta/qualify-meta-${{ matrix.os }}-rocm-${{ matrix.rocm }}.json
+          --archive-dir ./artifact
+          --run-binaries
+          --fail-on-error
+          --output fragments/tier0-${{ matrix.os }}-rocm-${{ matrix.rocm }}.json
+
+      - name: Upload Tier 0 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualify-fragments-tier0-${{ matrix.os }}-${{ matrix.rocm }}
+          path: fragments/*.json
+          if-no-files-found: warn
+
+  qualify-tier1:
+    # Runs on every event except a pull request from a fork, which must not reach the self-hosted GPU runners.
+    if: >-
+      ${{ !cancelled() && needs.resolve-upstream.result == 'success' && needs.resolve-upstream.outputs.skip != 'true' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository) }}
+    needs:
+      - resolve-upstream
+      - ubuntu-latest-rocm
+      - windows-latest-rocm
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu
+            rocm: "10.0"
+            runner: [self-hosted, strix-halo, xsj-dispatch, Linux]
+          - os: ubuntu
+            rocm: "10.1"
+            runner: [self-hosted, strix-halo, xsj-dispatch, Linux]
+          - os: ubuntu
+            rocm: "10.2"
+            runner: [self-hosted, strix-halo, xsj-dispatch, Linux]
+          - os: win
+            rocm: "10.0"
+            runner: [self-hosted, strix-halo, xsj-dispatch, Windows]
+          - os: win
+            rocm: "10.1"
+            runner: [self-hosted, strix-halo, xsj-dispatch, Windows]
+          - os: win
+            rocm: "10.2"
+            runner: [self-hosted, strix-halo, xsj-dispatch, Windows]
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout qualification suite
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # Self-hosted runners may carry another Python earlier on PATH.
+      - name: Pin the interpreter
+        shell: python
+        run: |
+          import os
+          location = os.environ["pythonLocation"]
+          interpreter = (os.path.join(location, "python.exe") if os.name == "nt"
+                         else os.path.join(location, "bin", "python"))
+          if not os.path.exists(interpreter):
+              raise SystemExit(f"::error::no interpreter at {interpreter}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"QUALIFY_PYTHON={interpreter}\n")
+
+      - name: Download qualification metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: qualify-meta-${{ matrix.os }}-rocm-${{ matrix.rocm }}
+          path: ./meta
+
+      - name: Name the archive
+        id: archive
+        shell: python
+        run: |
+          import json, os
+          with open("meta/qualify-meta-${{ matrix.os }}-rocm-${{ matrix.rocm }}.json", encoding="utf-8-sig") as handle:
+              name = json.load(handle)["artifact"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"name={name}\n")
+
+      - name: Download ROCm archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.archive.outputs.name }}
+          path: ./artifact
+
+      - name: Install a user-style ROCm runtime
+        run: >-
+          ${{ env.QUALIFY_PYTHON }} .github/qualify-rocm/install_rocm.py
+          --version ${{ matrix.rocm }}.0
+          --arch gfx1151
+          --output-json rocm-install.json
+
+      - name: Run Tier 1 GPU inference
+        run: >-
+          ${{ env.QUALIFY_PYTHON }} .github/qualify-rocm/tier1_gpu.py
+          --meta meta/qualify-meta-${{ matrix.os }}-rocm-${{ matrix.rocm }}.json
+          --archive-dir ./artifact
+          --gfx-target gfx1151
+          --logs-dir fragments
+          --fail-on-error
+          --output fragments/tier1-${{ matrix.os }}-rocm-${{ matrix.rocm }}.json
+
+      - name: Upload Tier 1 report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualify-fragments-tier1-${{ matrix.os }}-${{ matrix.rocm }}
+          path: |
+            fragments/*.json
+            fragments/*.log
+          if-no-files-found: warn
+
+      # Backstop for a cancelled run. Only sd-server processes started from this job's
+      # temp folder are stopped, never another one on a shared machine.
+      - name: Tear down (Windows)
+        if: always() && runner.os == 'Windows'
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Get-Process sd-server -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($env:RUNNER_TEMP, [StringComparison]::OrdinalIgnoreCase) } |
+            Stop-Process -Force
+
+      - name: Tear down (Linux)
+        if: always() && runner.os == 'Linux'
+        continue-on-error: true
+        run: pkill -f "${RUNNER_TEMP}/tier1-[^ ]*/sd-server" || true
+
   release:
-    # always() overrides the default behavior of skipping this job when a
-    # needed build job fails (e.g. one CUDA sm_* matrix leg fails while
-    # sibling legs succeed and upload). The job must still run so the
-    # per-family checks below can decide what's actually complete and safe
-    # to publish.
-    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
+    # !cancelled() so a failed build leg does not skip the release -- the per-family
+    # checks below decide what is complete and safe to publish -- while a run
+    # cancelled before this job starts publishes nothing. A cancel during the upload
+    # leaves what was already uploaded; the next nightly sees the gap and refills it.
+    if: >-
+      ${{ !cancelled() && needs.resolve-upstream.result == 'success' &&
+          needs.resolve-upstream.outputs.skip != 'true' &&
+          (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
 
     permissions:
       contents: write
 
-    runs-on: ubuntu-latest
+    # Two runs on the same tag (a manual release overlapping the nightly) would
+    # otherwise upload into one release at once and could pair one run's
+    # qualification record with the other run's archive. The second one waits.
+    concurrency:
+      group: release-${{ needs.resolve-upstream.outputs.tag }}
+      cancel-in-progress: false
+
+    runs-on: ubuntu-24.04
 
     needs:
+      - resolve-upstream
       - ubuntu-latest-cmake
       - ubuntu-latest-cmake-vulkan
       - ubuntu-latest-cuda
@@ -1021,6 +1370,17 @@ jobs:
       - macos-arm64-cmake
       - windows-latest-cmake
       - windows-latest-rocm
+      - qualify-tier0
+      - qualify-tier1
+
+    # For publish-qualification: the ROCm archives T0.12 ran on, and the ones this run uploaded.
+    outputs:
+      final_checked: ${{ steps.final.outputs.archives }}
+      published_rocm: ${{ steps.upload_release.outputs.rocm }}
+
+    env:
+      TAG: ${{ needs.resolve-upstream.outputs.tag }}
+      SHORT: ${{ needs.resolve-upstream.outputs.short }}
 
     steps:
       - name: Clone
@@ -1030,6 +1390,12 @@ jobs:
           submodules: recursive
           fetch-depth: 0
           repository: 'leejet/stable-diffusion.cpp'
+          ref: ${{ needs.resolve-upstream.outputs.sha }}
+
+      - name: Checkout qualification suite
+        uses: actions/checkout@v6
+        with:
+          path: lemonade-ci
 
       - name: Download artifacts
         id: download-artifact
@@ -1039,105 +1405,119 @@ jobs:
           pattern: sd-*
           merge-multiple: true
 
-      - name: Get commit count
-        id: commit_count
-        run: |
-          echo "count=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Get commit hash
-        id: commit
-        uses: prompt/actions-commit-hash@v2
-
-      - name: Generate tag name
-        id: tag_name
-        run: |
-          TAG_NAME="${{ env.BRANCH_NAME }}-${{ steps.commit_count.outputs.count }}-${{ steps.commit.outputs.short }}"
-          echo "name=${TAG_NAME}" >> $GITHUB_OUTPUT
-
+      # Each backend family ships as a complete set or not at all; each ROCm version is
+      # its own family, so a gap in one version never withholds another.
       - name: Check release artifacts
         id: check_artifacts
-        env:
-          BRANCH: ${{ env.BRANCH_NAME }}
-          SHORT: ${{ steps.commit.outputs.short }}
+        run: >-
+          python3 lemonade-ci/.github/qualify-rocm/release_assets.py check-dir
+          --dir artifact --branch "$BRANCH_NAME" --short "$SHORT" --rocm-versions "$ROCM_VERSIONS"
+
+      - name: Download qualification fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: qualify-fragments-*
+          path: ./fragments
+          merge-multiple: true
+
+      - name: Download qualification metadata
+        uses: actions/download-artifact@v4
+        with:
+          pattern: qualify-meta-*
+          path: ./meta
+          merge-multiple: true
+
+      # T0.12: the exact files about to be uploaded are the ones Tier 0 and Tier 1 tested.
+      - name: Final-archive checks
+        id: final
         run: |
-          total_missing=0
-          summary=""
+          shopt -s nullglob
+          mkdir -p fragments
+          # Only this attempt's final checks count, never ones downloaded from an earlier attempt.
+          rm -f fragments/tier0-final-*.json
+          checked=""
+          for archive in artifact/sd-"${BRANCH_NAME}-${SHORT}"-bin-*-rocm-*.zip; do
+            base=$(basename "$archive")
+            if [[ "$base" == *-win-rocm-* ]]; then os=win; else os=ubuntu; fi
+            ver=$(sed -E 's/.*-rocm-([0-9]+\.[0-9]+)\.[0-9]+(-x64)?\.zip$/\1/' <<<"$base")
+            checked="${checked:+$checked }$base"
+            python3 lemonade-ci/.github/qualify-rocm/check_final.py \
+              --archive "$archive" --meta "meta/qualify-meta-$os-rocm-$ver.json" \
+              --output "fragments/tier0-final-$os-rocm-$ver.json" \
+              || echo "::error::check_final.py crashed on $base, so T0.12 will show as missing"
+          done
+          echo "archives=$checked" >> "$GITHUB_OUTPUT"
 
-          check_family() {
-            local family="$1"; shift
-            local patterns=("$@")
-            local missing=0
-            for pattern in "${patterns[@]}"; do
-              if ! ls $pattern >/dev/null 2>&1; then
-                echo "::error::[$family] Missing artifact: $pattern"
-                missing=$((missing + 1))
-              fi
+      # So publish-qualification can still see T0.12 if this job stops before writing records.
+      - name: Upload final-archive reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualify-fragments-final
+          path: fragments/tier0-final-*.json
+          if-no-files-found: ignore
+
+      - name: Qualify ROCm release artifacts
+        id: qualify
+        continue-on-error: true
+        run: |
+          mkdir -p qualification
+          python3 lemonade-ci/.github/qualify-rocm/aggregate.py \
+            --fragments-dir ./fragments \
+            --tag "$TAG" \
+            --records-dir ./qualification \
+            --output-summary ./qualification/qualification-summary.json \
+            --operating-systems "$ROCM_OPERATING_SYSTEMS" \
+            --rocm-versions "$ROCM_VERSIONS" \
+            --require-final \
+            --fail-on-no-promote
+
+      # Uploaded straight away so a later failure in this job cannot keep them out of the feed.
+      - name: Upload qualification records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-records
+          path: qualification/*.json
+          if-no-files-found: warn
+
+      - name: Drop unqualified ROCm versions
+        id: rocm_gate
+        env:
+          PROMOTE: ${{ steps.qualify.outputs.promote_rocm }}
+          BLOCKED: ${{ steps.qualify.outputs.blocked_rocm_versions }}
+        run: |
+          if [ "$PROMOTE" = "true" ]; then
+            echo "Every ROCm version qualified."
+            echo "dropped=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # No verdict at all means no evidence for any version, so withhold them all.
+          blocked="$BLOCKED"
+          if [ -z "$blocked" ]; then
+            blocked="${ROCM_VERSIONS//,/ }"
+            echo "::warning::Qualification produced no verdict; withholding every ROCm version."
+          fi
+          dropped=0
+          for version in $blocked; do
+            for archive in "artifact/sd-${BRANCH_NAME}-${SHORT}-bin-win-rocm-${version}.0-x64.zip" \
+                           "artifact/sd-${BRANCH_NAME}-${SHORT}-bin-Linux-"*"-rocm-${version}.0.zip"; do
+              [ -f "$archive" ] || continue
+              echo "::warning::ROCm ${version} did not qualify; withholding $(basename "$archive")."
+              rm -fv "$archive"
+              dropped=$((dropped + 1))
             done
-            if [ "$missing" -gt 0 ]; then
-              echo "::warning::$family family is incomplete ($missing artifact(s) missing) — dropping all $family artifacts from this release."
-              for pattern in "${patterns[@]}"; do
-                rm -fv $pattern 2>/dev/null || true
-              done
-              total_missing=$((total_missing + missing))
-              summary="${summary}${summary:+, }${family}: $missing missing, family dropped"
-            fi
-          }
-
-          # Each backend family must be published as a complete, internally
-          # consistent set across every platform/variant/SDK it covers — never
-          # a partial mix. A gap in one family drops that whole family from
-          # the release; other families are unaffected.
-
-          # CUDA: 8 sm_* variants on ubuntu x64 and windows x64; only sm_121
-          # (GB10) is built for ubuntu arm64.
-          cuda_patterns=()
-          for sm in sm_75 sm_80 sm_86 sm_89 sm_90 sm_100 sm_120 sm_121; do
-            cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-${sm}-x64.tar.xz")
-            cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-windows-cuda-${sm}-x64.zip")
           done
-          cuda_patterns+=("artifact/sd-${BRANCH}-${SHORT}-ubuntu-cuda-sm_121-arm64.tar.xz")
-          check_family cuda "${cuda_patterns[@]}"
+          echo "dropped=$dropped" >> "$GITHUB_OUTPUT"
+          echo "blocked=$blocked" >> "$GITHUB_OUTPUT"
 
-          # TheRock ROCm: each version is its own family. Lemonade downloads exactly
-          # the version its `therock.version` pin names, so a gap in one version must
-          # not withhold another; only the Windows+Linux pair within a version must match.
-          # Keep this list in sync with the windows-latest-rocm and ubuntu-latest-rocm matrices.
-          for rocm_ver in 10.0.0 10.1.0 10.2.0; do
-            check_family "rocm-${rocm_ver}" \
-              "artifact/sd-${BRANCH}-${SHORT}-bin-win-rocm-${rocm_ver}-x64.zip" \
-              "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-Ubuntu-24.04-x86_64-rocm-${rocm_ver}.zip"
+      - name: Stage qualification records as release assets
+        run: |
+          shopt -s nullglob
+          for record in qualification/qualification-sd-*.json; do
+            cp -v "$record" artifact/
           done
-
-          # CPU: ubuntu-latest-cmake's filename embeds the runner's OS name/
-          # version via lsb_release, so it's wildcarded rather than pinned.
-          check_family cpu \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64.zip" \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-win-cpu-x64.zip"
-
-          # Vulkan: same runner as CPU, differs only in -DSD_VULKAN=ON.
-          # Only builds Linux since the runner doesn't have a dedicated Windows vulkan build.
-          check_family vulkan \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-Linux-*-x86_64-vulkan.zip"
-
-          check_family metal \
-            "artifact/sd-${BRANCH}-${SHORT}-bin-Darwin-macOS-*-arm64.zip"
-
-          echo "missing=$total_missing" >> "$GITHUB_OUTPUT"
-          echo "summary=$summary" >> "$GITHUB_OUTPUT"
-
-          files=$(find ./artifact -maxdepth 1 \( -name '*.zip' -o -name '*.tar.xz' \) 2>/dev/null | wc -l)
-
-          # Never create or update a release with nothing to publish.
-          if [ "$files" -eq 0 ]; then
-            echo "::error::No release artifacts found in ./artifact — aborting before creating a release."
-            exit 1
-          fi
-
-          if [ "$total_missing" -gt 0 ]; then
-            echo "$total_missing artifact(s) missing ($summary) — continuing to publish the $files artifact(s) from complete families. The job will still fail below so the gap gets noticed."
-          else
-            echo "All expected artifacts present. Found $files artifact(s) ready to upload."
-          fi
 
       - name: Determine release summary
         id: release_summary
@@ -1148,20 +1528,16 @@ jobs:
             echo "value=$(git log -1 --pretty=%s)" >> "$GITHUB_OUTPUT"
           fi
 
-      # Get the release for this tag, creating it if it does not exist yet.
-      # This is idempotent: if a previous run created the release but failed
-      # partway through uploading (e.g. a transient GitHub outage), re-running
-      # reuses the existing release so the upload step below can fill the gaps.
+      # Reuses the release when the tag already exists (an earlier run left gaps to fill).
       - name: Create or get release
         id: release
         uses: actions/github-script@v8
         env:
-          TAG_NAME: ${{ steps.tag_name.outputs.name }}
           RELEASE_SUMMARY: ${{ steps.release_summary.outputs.value }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const tag = process.env.TAG_NAME;
+            const tag = process.env.TAG;
             const { owner, repo } = context.repo;
             let release;
             try {
@@ -1170,7 +1546,7 @@ jobs:
             } catch (e) {
               if (e.status !== 404) throw e;
               try {
-                release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, body: process.env.RELEASE_SUMMARY })).data;
+                release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, name: tag, body: process.env.RELEASE_SUMMARY })).data;
                 core.info(`Created release ${tag} (id ${release.id})`);
               } catch (createError) {
                 if (createError.status !== 422) throw createError;
@@ -1180,23 +1556,22 @@ jobs:
             }
             core.setOutput('id', release.id);
 
+      # Assets already in the release are never replaced: Lemonade may already pin them, and
+      # they were qualified when they were uploaded. A record is uploaded with its archive.
+      # checksums.txt is rebuilt from GitHub's digests, so it always matches what is published.
       - name: Upload release
         id: upload_release
         uses: actions/github-script@v8
         env:
           RELEASE_ID: ${{ steps.release.outputs.id }}
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             const { owner, repo } = context.repo;
             const release_id = Number(process.env.RELEASE_ID);
-
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-            // Retry transient failures (network errors, 5xx, rate limits) with
-            // exponential backoff so a momentary GitHub blip does not abort the
-            // whole upload and leave the release partially populated.
             async function withRetry(label, fn, attempts = 5) {
               for (let i = 1; ; i++) {
                 try {
@@ -1210,63 +1585,256 @@ jobs:
                 }
               }
             }
-
-            const files = fs.readdirSync('./artifact').filter((f) => f.endsWith('.zip') || f.endsWith('.tar.xz'));
-            const wanted = new Set(files);
-
-            // Reconcile existing release assets against what this run decided to
-            // publish: drop anything not fully uploaded (a broken partial upload)
-            // and anything not in the current file set. The latter case matters
-            // because the release is reused across runs against the same tag —
-            // if a family was complete and published in an earlier run but this
-            // run finds it incomplete and drops it locally, its assets from that
-            // earlier run would otherwise linger and make the family look
-            // complete even though this run couldn't reproduce it.
-            const existing = new Set();
-            for (const a of await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id })) {
-              if (a.state === 'uploaded' && wanted.has(a.name)) {
-                existing.add(a.name);
-              } else {
-                const reason = a.state !== 'uploaded' ? `incomplete (${a.state})` : 'stale (not part of this run)';
-                core.warning(`deleting ${reason} asset ${a.name}`);
-                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
-              }
-            }
-
-            let uploaded = 0;
-            let skipped = 0;
-            for (const file of files) {
-              if (existing.has(file)) {
-                core.info(`skipping ${file} (already uploaded)`);
-                skipped++;
-                continue;
-              }
-              const data = fs.readFileSync(`./artifact/${file}`);
-              await withRetry(`upload ${file}`, () =>
-                github.rest.repos.uploadReleaseAsset({ owner, repo, release_id, name: file, data })
+            const listAssets = () => github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id });
+            async function upload(name, data) {
+              await withRetry(`upload ${name}`, () =>
+                github.rest.repos.uploadReleaseAsset({ owner, repo, release_id, name, data })
                   .catch(async (e) => {
                     if (e.status !== 422) throw e;
-                    const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id });
-                    const asset = assets.find((a) => a.name === file);
-                    if (asset?.state === 'uploaded') {
-                      core.info(`accepting ${file} (already uploaded)`);
-                      return;
-                    }
-                    if (asset) {
-                      core.warning(`deleting conflicting asset ${file} (${asset.state})`);
-                      await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id });
-                      throw new Error(`retrying upload for ${file} after deleting conflicting asset`);
-                    }
-                    throw e;
+                    const asset = (await listAssets()).find((a) => a.name === name);
+                    if (asset?.state === 'uploaded') return;
+                    if (asset) await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id });
+                    throw new Error(`retrying upload for ${name} after deleting conflicting asset`);
                   }));
-              core.info(`uploaded ${file}`);
-              uploaded++;
+              core.info(`uploaded ${name}`);
+            }
+            async function remove(asset, reason) {
+              core.warning(`deleting ${reason} asset ${asset.name}`);
+              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id });
             }
 
-            core.info(`Done: ${uploaded} uploaded, ${skipped} already present, ${files.length} total.`);
+            const published = new Map();
+            for (const a of await listAssets()) {
+              if (a.state === 'uploaded') published.set(a.name, a);
+              else await remove(a, `incomplete (${a.state})`);
+            }
+
+            const files = fs.readdirSync('./artifact');
+            const archives = files.filter((f) => f.endsWith('.zip') || f.endsWith('.tar.xz'));
+            // A record goes up before its archive, so an archive is never published without one.
+            const records = files.filter((f) => f.startsWith('qualification-') && f.endsWith('.json'));
+            const recordFor = (archive) => `qualification-${archive.replace(/\.(zip|tar\.xz)$/, '')}.json`;
+            async function uploadRecord(record) {
+              if (published.has(record)) await remove(published.get(record), 'superseded');
+              await upload(record, fs.readFileSync(`./artifact/${record}`));
+            }
+            const uploaded = [];
+            for (const file of archives) {
+              if (published.has(file)) {
+                core.info(`keeping ${file} (already published)`);
+                continue;
+              }
+              if (records.includes(recordFor(file))) await uploadRecord(recordFor(file));
+              await upload(file, fs.readFileSync(`./artifact/${file}`));
+              uploaded.push(file);
+              // Written after every upload, so a later failure still reports what did ship.
+              core.setOutput('rocm', uploaded.filter((f) => /-rocm-/.test(f)).join(' '));
+            }
+            // Records of withheld archives say why they were withheld.
+            for (const record of records) {
+              const archive = record.replace(/^qualification-/, '').replace(/\.json$/, '.zip');
+              if (!published.has(archive) && !uploaded.includes(archive)) await uploadRecord(record);
+            }
+
+            const assets = (await listAssets()).filter((a) => a.state === 'uploaded');
+            const sums = assets.filter((a) => a.name.endsWith('.zip') || a.name.endsWith('.tar.xz'))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((a) => {
+                if (!a.digest?.startsWith('sha256:')) throw new Error(`no SHA-256 digest for ${a.name}`);
+                return `${a.digest.slice('sha256:'.length)}  ${a.name}`;
+              });
+            const old = assets.find((a) => a.name === 'checksums.txt');
+            if (old) await remove(old, 'superseded');
+            await upload('checksums.txt', Buffer.from(sums.join('\n') + '\n'));
+
+            const names = assets.map((a) => a.name).filter((n) => n !== 'checksums.txt');
+            fs.writeFileSync('release-assets.txt', [...names, 'checksums.txt'].join('\n') + '\n');
+            core.setOutput('rocm', uploaded.filter((f) => /-rocm-/.test(f)).join(' '));
+            core.info(`Done: ${uploaded.length} archive(s) uploaded, ${archives.length - uploaded.length} already published.`);
+
+      - name: Write release notes
+        env:
+          RELEASE_SUMMARY: ${{ steps.release_summary.outputs.value }}
+        run: >-
+          python3 lemonade-ci/.github/qualify-rocm/release_notes.py
+          --tag "$TAG" --repo "${{ github.repository }}"
+          --assets-file release-assets.txt --rocm-versions "$ROCM_VERSIONS"
+          --summary "$RELEASE_SUMMARY" --output release-notes.md
+
+      - name: Update release notes
+        uses: actions/github-script@v8
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            await github.rest.repos.updateRelease({
+              owner, repo, release_id: Number(process.env.RELEASE_ID),
+              name: process.env.TAG, body: fs.readFileSync('release-notes.md', 'utf8'),
+            });
 
       - name: Fail if any artifacts were missing
         if: steps.check_artifacts.outputs.missing != '0'
         run: |
           echo "::error::${{ steps.check_artifacts.outputs.missing }} artifact(s) were missing (${{ steps.check_artifacts.outputs.summary }}) — the incomplete families were dropped from this release; other families were still published. See the 'Check release artifacts' step for the full per-file list."
           exit 1
+
+      - name: Fail if ROCm qualification did not pass
+        if: steps.rocm_gate.outputs.dropped != '0'
+        run: |
+          echo "::error::ROCm ${{ steps.rocm_gate.outputs.blocked }} did not qualify — ${{ steps.rocm_gate.outputs.dropped }} archive(s) were withheld. Every other ROCm version and backend was published normally. The attached qualification-*.json records list each failing check."
+          exit 1
+
+  # Publishes every run's ROCm qualification records, passing or failing, to the
+  # qualification-data branch the ROCm readiness dashboard reads (format: .github/qualify-rocm/FEED.md).
+  # A nightly skipped because its release was already complete records only that it
+  # checked and found nothing new (index.json "last_check"). The branch is created on the first publish.
+  publish-qualification:
+    if: >-
+      ${{ !cancelled() && needs.resolve-upstream.result == 'success' &&
+          (needs.resolve-upstream.outputs.skip == 'true' ||
+           needs.release.result == 'success' || needs.release.result == 'failure') }}
+    needs:
+      - resolve-upstream
+      - release
+
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write # to push to the qualification-data branch
+      actions: read   # to read each ROCm build job's result
+
+    steps:
+      - name: Checkout qualification suite
+        uses: actions/checkout@v6
+        with:
+          path: lemonade-ci
+
+      - name: Download qualification records
+        if: needs.resolve-upstream.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: qualification-records
+          path: ./records
+
+      - name: Download qualification fragments
+        if: needs.resolve-upstream.outputs.skip != 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: qualify-fragments-*
+          path: ./fragments
+          merge-multiple: true
+
+      # If the release job stopped before writing records, build them from the tier reports.
+      - name: Collect qualification records
+        if: needs.resolve-upstream.outputs.skip != 'true'
+        env:
+          TAG: ${{ needs.resolve-upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          records=(records/qualification-sd-*.json)
+          if [ ${#records[@]} -gt 0 ]; then
+            echo "Using the ${#records[@]} record(s) the release job wrote."
+            exit 0
+          fi
+          echo "The release job wrote no records; building them from the Tier 0 and Tier 1 reports."
+          mkdir -p records fragments
+          python3 lemonade-ci/.github/qualify-rocm/aggregate.py \
+            --fragments-dir ./fragments \
+            --tag "$TAG" \
+            --records-dir ./records \
+            --output-summary ./records/qualification-summary.json \
+            --operating-systems "$ROCM_OPERATING_SYSTEMS" \
+            --rocm-versions "$ROCM_VERSIONS" \
+            --require-final
+
+      - name: Read build job results
+        if: needs.resolve-upstream.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if gh api --paginate \
+                "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?filter=latest&per_page=100" \
+                --jq '.jobs[] | {name, conclusion}' > jobs.jsonl; then
+              grep -E '"name":"(ubuntu-latest-rocm|windows-latest-rocm) ' jobs.jsonl || true
+              exit 0
+            fi
+            echo "Could not read the run's jobs (attempt $attempt); retrying"
+            sleep $((attempt * 5))
+          done
+          echo "::warning::Could not read the run's jobs; build_result will be 'unknown'."
+          : > jobs.jsonl
+
+      - name: Publish to qualification-data branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve-upstream.outputs.tag }}
+          UPSTREAM_SHA: ${{ needs.resolve-upstream.outputs.sha }}
+          PUBLISHED_ROCM: ${{ needs.release.outputs.published_rocm }}
+          FINAL_CHECKED: ${{ needs.release.outputs.final_checked }}
+          UNCHANGED: ${{ needs.resolve-upstream.outputs.skip }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          BRANCH="qualification-data"
+
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            rm -rf data
+            found=0
+            git ls-remote --exit-code --heads "$REPO_URL" "$BRANCH" >/dev/null || found=$?
+            if [ "$found" -eq 0 ]; then
+              if ! git clone --quiet --depth 1 --branch "$BRANCH" "$REPO_URL" data; then
+                echo "Clone failed (attempt $attempt); retrying"; sleep $((attempt * 3)); continue
+              fi
+            elif [ "$found" -eq 2 ]; then
+              echo "$BRANCH does not exist yet; creating it"
+              git init --quiet data
+              git -C data checkout --quiet --orphan "$BRANCH"
+              git -C data remote add origin "$REPO_URL"
+            else
+              echo "Could not reach the repository (attempt $attempt); retrying"; sleep $((attempt * 3)); continue
+            fi
+
+            if [ "$UNCHANGED" = "true" ]; then
+              python3 lemonade-ci/.github/qualify-rocm/publish_qualification.py --mark-unchanged \
+                --data-dir data/qualification --tag "$TAG" --upstream-sha "$UPSTREAM_SHA"
+            else
+              python3 lemonade-ci/.github/qualify-rocm/publish_qualification.py \
+                --records-dir records \
+                --data-dir data/qualification \
+                --operating-systems "$ROCM_OPERATING_SYSTEMS" \
+                --rocm-versions "$ROCM_VERSIONS" \
+                --tag "$TAG" \
+                --upstream-sha "$UPSTREAM_SHA" \
+                --jobs-file jobs.jsonl \
+                --published-artifacts "$PUBLISHED_ROCM" \
+                --final-checked "$FINAL_CHECKED"
+            fi
+            cp lemonade-ci/.github/qualify-rocm/FEED.md data/qualification/SCHEMA.md
+
+            git -C data add -A
+            if git -C data diff --cached --quiet; then
+              echo "Nothing changed; the feed already holds this run."
+              pushed=1; break
+            fi
+            if [ "$UNCHANGED" = "true" ]; then message="unchanged"; else message="run"; fi
+            git -C data commit --quiet -m "qualification: ${message} ${{ github.run_id }} (${TAG})"
+            if git -C data push --quiet origin "$BRANCH"; then
+              pushed=1; break
+            fi
+            echo "Push rejected (attempt $attempt), most likely because another run published first; retrying"
+            sleep $((attempt * 3))
+          done
+
+          [ "$pushed" = 1 ] || { echo "::error::Could not publish to $BRANCH after 5 attempts."; exit 1; }
+          echo "Feed: https://raw.githubusercontent.com/${{ github.repository }}/${BRANCH}/qualification/index.json"
