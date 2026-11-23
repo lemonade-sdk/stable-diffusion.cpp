@@ -9,7 +9,7 @@ Reads the records `aggregate.py` wrote (one qualification-<archive>.json per arc
   latest/<os>-rocm-<ver>.json   the newest full record for that archive
 
 build_id is "<run_id>-<os>-rocm-<rocm_version>".
-Publishing the same run again (a re-run) replaces its rows and files rather than duplicating them, so this script is safe to run any number of times.
+Publishing the same run again (a re-run) replaces its rows and files rather than duplicating them, so this script is safe to run any number of times -- except a row an earlier attempt of the run already shipped for the same tag, and this attempt did not upload again, which is kept as it is.
 
 Every archive the run was meant to build gets a row.
 An archive with no record (its build failed / no check ever reported on it) gets a placeholder row and a placeholder report saying so. Therefore, a failing build shows up in the feed instead of silently leaving a gap.
@@ -184,8 +184,9 @@ def absent_status(record, test_id, final_checked):
 
 def tier_status(record, tier):
     """pass | warn | fail for a tier that reported, otherwise missing."""
-    reported = record.get("tiers", {}).get(tier)
-    return reported.get("status") if reported else STATUS_MISSING
+    if not aggregate.tier_reported(record, tier):
+        return STATUS_MISSING
+    return record["tiers"][tier].get("status")
 
 
 def collect_results(record, final_checked):
@@ -265,7 +266,7 @@ def build_entry(record, build_id, build_result, version_qualified, published,
         },
         "generated_at": record.get("generated_at"),
         "run_id": build.get("run_id"),
-        # The attempt that published this row, the same for every row of the run.
+        # The attempt that published this row (a kept shipped row keeps its own).
         "run_attempt": run_attempt if run_attempt is not None else _int(build.get("run_attempt")),
         "run_url": run_url,
         "event": event,
@@ -376,8 +377,14 @@ def upsert_index(index_path, repo, entries, check=None):
         "updated_at": max((b.get("generated_at") or "" for b in builds), default="") or None,
         "builds": builds,
     }
-    if check or index.get("last_check"):
-        out["last_check"] = check or index["last_check"]
+    # Like latest/, last_check never moves back to an older run: re-running an
+    # old run must not make the dashboard report it as the newest decision.
+    previous = index.get("last_check")
+    if check and previous and _run_order(previous.get("run_id")) > _run_order(check.get("run_id")):
+        print(f"last_check kept: it already holds newer run {previous.get('run_id')}")
+        check = previous
+    if check or previous:
+        out["last_check"] = check or previous
     return out
 
 
@@ -461,14 +468,25 @@ def main():
     os.makedirs(os.path.join(args.data_dir, "reports"), exist_ok=True)
     os.makedirs(os.path.join(args.data_dir, "latest"), exist_ok=True)
 
-    # A re-run of the release job finds its archives already uploaded, so it uploads
-    # nothing; keep what the earlier attempt of the same run published.
-    prior_published = {b.get("build_id") for b in read_index(index_path).get("builds", [])
-                       if b.get("published")}
+    # A re-run of the same run (same build_id) finds the archives an earlier attempt
+    # shipped already in the release and cannot replace them. Its own record then
+    # describes rebuilt bytes that never shipped, so the earlier attempt's row and
+    # report -- which describe what users actually download -- are kept instead.
+    shipped = {b.get("build_id"): b for b in read_index(index_path).get("builds", [])
+               if b.get("published")}
 
     entries = []
     for record, build_id, is_placeholder in items:
         build = record["build"]
+        # Same tag only: a re-run of all jobs re-resolves upstream, and a new tag
+        # is a different build whose result must not be hidden.
+        old = shipped.get(build_id)
+        if (old and old.get("tag") == build.get("sdcpp_tag")
+                and build.get("artifact") not in published_artifacts):
+            entries.append(shipped[build_id])
+            print(f"{build_id}: kept the row of the attempt that shipped it "
+                  f"(attempt {shipped[build_id].get('run_attempt')})")
+            continue
         run_url = (f"{args.server_url}/{args.repo}/actions/runs/{build.get('run_id') or args.run_id}"
                    if args.repo else None)
         build_result = build_results.get((build.get("os"), build.get("rocm_version")), BUILD_UNKNOWN)
@@ -479,8 +497,7 @@ def main():
             version_qualified = None
         else:
             version_qualified = build.get("rocm_version") not in blocked_versions
-        published = not is_placeholder and (build.get("artifact") in published_artifacts
-                                            or build_id in prior_published)
+        published = not is_placeholder and build.get("artifact") in published_artifacts
         entry = build_entry(record, build_id, build_result, version_qualified, published,
                             final_checked, run_url, args.event, run_attempt)
         entries.append(entry)

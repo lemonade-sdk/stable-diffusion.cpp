@@ -74,6 +74,10 @@ _CHUNK = 64 << 20
 # next. Carrying this many bytes over to the next piece guarantees every tag is
 # seen whole. It comfortably exceeds the length of any tag.
 _OVERLAP = 256
+# Bytes a tag's leading word ("hip", "hipv4", ...) is made of. A piece is never
+# cut inside such a word: the carried-over half would otherwise match again on
+# its own ("ip-amdgcn-...") and the tag would be counted twice.
+_WORD_BYTES = frozenset(b"abcdefghijklmnopqrstuvwxyz0123456789_")
 
 
 def strip_target_id(entry_id):
@@ -145,6 +149,9 @@ def scan_offload_bundles(path):
             total += len(buf)
             window = tail + buf
             safe = max(len(window) - _OVERLAP, 0)
+            floor = max(len(window) - 2 * _OVERLAP, 0)
+            while safe > floor and window[safe - 1] in _WORD_BYTES:
+                safe -= 1
             tally(window, safe)
             tail = window[safe:]
     return counts, magic, total
@@ -360,9 +367,10 @@ def pe_imports(path):
     The Windows equivalent of the library list in elf_dynamic(). If one of
     these DLLs is missing on the user's machine, the program fails to load.
 
-    Returns an empty list rather than raising if the file cannot be parsed:
-    this feeds a report, and an unreadable file should show up as a finding,
-    not as a crash that stops every other check from running.
+    Returns an empty list only when the file genuinely imports nothing. A
+    malformed import table raises ValueError, so the caller records the file as
+    unreadable -- a finding -- instead of quietly treating it as importing
+    nothing and skipping it.
     """
     with open(path, "rb") as handle:
         data = handle.read()
@@ -398,17 +406,22 @@ def pe_imports(path):
         names = []
         table = rva_to_off(import_rva)
         if table is None:
-            return []
+            raise ValueError(f"{path}: the import table lies outside every section")
         while True:
             entry = data[table: table + 20]
-            if len(entry) < 20 or entry == b"\0" * 20:
+            if len(entry) < 20:
+                raise ValueError(f"{path}: the import table runs past the end of the file")
+            if entry == b"\0" * 20:
                 break
             name_rva, = struct.unpack_from("<I", entry, 12)
             name_off = rva_to_off(name_rva)
-            if name_off is not None:
-                end = data.find(b"\0", name_off)
-                names.append(data[name_off:end].decode("ascii", "replace"))
+            if name_off is None:
+                raise ValueError(f"{path}: an imported DLL's name lies outside every section")
+            end = data.find(b"\0", name_off)
+            if end < 0:
+                raise ValueError(f"{path}: an imported DLL's name runs past the end of the file")
+            names.append(data[name_off:end].decode("ascii", "replace"))
             table += 20
         return names
-    except (struct.error, IndexError, ValueError):
-        return []
+    except (struct.error, IndexError) as exc:
+        raise ValueError(f"{path}: malformed PE import table: {exc}") from exc

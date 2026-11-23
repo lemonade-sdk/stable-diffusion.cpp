@@ -3,8 +3,9 @@
 Tier 1 -- GPU functional inference. Requires a real AMD GPU (gfx1151 runners).
 
 Drives sd-server over HTTP rather than sd-cli, because sd-server is the binary
-Lemonade actually launches, with the flags it uses (SERVER_ARGS below) and the
-model it validates stable-diffusion.cpp with.
+Lemonade actually launches, with the model Lemonade validates
+stable-diffusion.cpp with. It is started the way Lemonade starts it (model and
+port) plus `-v`, which Lemonade adds only in debug mode but T1.2 needs.
 
 T1.2 is the check that carries the weight here. A ROCm build that cannot use
 the GPU is not treated as an error by stable-diffusion.cpp: it logs that no
@@ -16,10 +17,11 @@ the work.
 
 Checks:
   T1.1  server boot              -- sd-server starts and serves its web page.
-  T1.2  GPU really did the work  -- GATING. A ROCm device was found, every
-                                    model component's weights were placed in
-                                    VRAM, and compute buffers were allocated in
-                                    VRAM on a ROCm device.
+  T1.2  GPU really did the work  -- GATING. A ROCm device was found, the
+                                    model's weights were placed in VRAM on a
+                                    ROCm device with none left on the CPU, and
+                                    compute buffers were allocated in VRAM on a
+                                    ROCm device.
   T1.3  GPU target detected      -- GATING. The device sd-server found is the
                                     gfx target this runner is meant to validate.
                                     This is what makes `hardware_validated` true.
@@ -42,12 +44,14 @@ import argparse
 import atexit
 import base64
 import hashlib
+import http.client
 import json
 import os
 import platform
 import re
 import shutil
 import signal
+import socket
 import struct
 import subprocess
 import sys
@@ -88,23 +92,34 @@ PROMPT = "a red apple on a wooden table"
 # prompt as <sd_cpp_extra_args>, which is also how Lemonade passes them.
 GEN_ARGS = {"seed": 42, "sample_params": {"sample_steps": 4, "guidance": {"txt_cfg": 1.0}}}
 
-# The flags Lemonade launches sd-server with besides the model and port.
-# `-v`is not optional: at the default log level sd-server never prints its compute
-# buffers, so T1.2 would find no evidence and fail a good build.
+# Added to the model and port Lemonade launches sd-server with. Lemonade passes
+# `-v` only in debug mode (as its CI runs), but here it is not optional: the
+# weight-buffer and compute-buffer lines T1.2 requires are verbose-only, so
+# without it T1.2 would find no evidence and fail a good build.
 SERVER_ARGS = ["-v"]
 
 # ---------------------------------------------------------------------------
 # Evidence that the GPU genuinely did the work
 #
-# All three are required, and each names a GPU or VRAM, so none can appear
-# unless a ROCm device was found and used:
+# All three are required, and each names a ROCm device or VRAM, so none can
+# appear unless a ROCm device was found and used:
 #   "  Device 0: AMD Radeon(TM) 8060S Graphics, gfx1151 (0x1151), VMM: no, ..."
 #       printed by ggml when it finds ROCm devices (any log level);
-#   "total params memory size = 1929.50MB (VRAM 1929.50MB, RAM 0.00MB):
-#    text_encoders 358.79MB(VRAM), diffusion_model 1411.02MB(VRAM), vae ..."
-#       where each model component's weights were placed (any log level);
+#   "model manager prepared params backend buffers (1411.07 MB, 686 tensors,
+#    2 blocks, VRAM) on ROCm0"
+#       one per model component as its weights are loaded (verbose only). On a
+#       CPU fallback it reads "(..., RAM) on CPU" instead, which fails the check;
 #   "unet compute buffer size: 87.86 MB(VRAM) on ROCm0 (peak across 1 segment)"
 #       printed when a graph is about to run (verbose only).
+#
+# These three were chosen because upstream kept them as it changed its other
+# logging. Two placement summaries are version-specific and have already been
+# renamed once, so they are optional: recorded when present, and a failure only
+# if they show a component on the CPU, never required:
+#   "total params memory size = 1929.50MB (VRAM 1929.50MB, RAM 0.00MB): ..."
+#       (upstream master-1106 and earlier)
+#   "load_unet: 1411.02 MiB params -> ROCm0"
+#       (master-1117 and later)
 #
 # Deliberately NOT accepted as evidence, despite how it reads:
 #   "Initializing backend: ROCm0"
@@ -112,11 +127,14 @@ SERVER_ARGS = ["-v"]
 # when the device then fails to initialise and everything falls back to the CPU.
 # ---------------------------------------------------------------------------
 DEVICE_RE = re.compile(r"Device (\d+): (.+?), (gfx[0-9a-fA-F]+) \(0x[0-9a-fA-F]+\)")
-PARAMS_RE = re.compile(r"total params memory size = ([0-9.]+)MB \(VRAM ([0-9.]+)MB, "
-                       r"RAM ([0-9.]+)MB\):([^\n]*)")
-COMPONENT_RE = re.compile(r"(\w+) ([0-9.]+)MB\((VRAM|RAM|N/A)\)")
+PARAMS_BUFFER_RE = re.compile(r"prepared params backend buffers \(\s*([0-9.]+) MB, [^)]*?"
+                              r"(VRAM|RAM)\) on (\S+)")
 COMPUTE_RE = re.compile(r"(\w+) compute buffer size: ([0-9.]+) MB\(VRAM\) on (ROCm\d+)")
-AUTO_FIT_RE = re.compile(r'auto-fit: --backend "([^"]+)"')
+TOTAL_PARAMS_RE = re.compile(r"total params memory size = ([0-9.]+)MB \(VRAM ([0-9.]+)MB, "
+                             r"RAM ([0-9.]+)MB\):([^\n]*)")
+COMPONENT_RE = re.compile(r"(\w+) ([0-9.]+)MB\((VRAM|RAM|N/A)\)")
+LOAD_PARAMS_RE = re.compile(r"load_(\w+): ([0-9.]+) MiB params -> (\S+)")
+ROCM_DEVICE_RE = re.compile(r"^ROCm\d+$")
 
 # Lines that explain WHY the GPU went unused, so the failure message can say
 # something more useful than "no evidence found". Each was seen in a real CPU
@@ -294,11 +312,30 @@ def runner_environment():
 # ---------------------------------------------------------------------------
 
 def http_get(url, timeout=10):
+    """(status, body) for an HTTP answer, or (None, b"") when there was none.
+
+    An HTTP error status is returned rather than swallowed, and a reply that is
+    not HTTP at all returns status 0. A timeout or a reset connection returns
+    None, so use port_in_use() to ask whether anything is listening.
+    """
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             return resp.status, resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, b""
+    except http.client.HTTPException:
+        return 0, b""
     except (urllib.error.URLError, OSError):
         return None, b""
+
+
+def port_in_use(port):
+    """Whether anything at all accepts connections on 127.0.0.1:port."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=3):
+            return True
+    except OSError:
+        return False
 
 
 def generate(base):
@@ -538,20 +575,25 @@ def gpu_evidence(log):
     """Pull the device, weight-placement and compute-buffer lines out of the log."""
     devices = [{"index": int(m.group(1)), "name": m.group(2), "gfx": m.group(3)}
                for m in DEVICE_RE.finditer(log)]
-    params = PARAMS_RE.search(log)
-    components = {}
-    if params:
-        for name, size, where in COMPONENT_RE.findall(params.group(4)):
-            components[name] = {"mb": float(size), "memory": where}
+    params = [{"mb": float(mb), "memory": memory, "device": device}
+              for mb, memory, device in PARAMS_BUFFER_RE.findall(log)]
     compute = [{"graph": g, "mb": float(mb), "device": dev} for g, mb, dev in COMPUTE_RE.findall(log)]
-    auto_fit = AUTO_FIT_RE.search(log)
+
+    # Version-specific placement summaries, if this upstream prints either.
+    placement = {}
+    total = TOTAL_PARAMS_RE.search(log)
+    if total:
+        for name, size, where in COMPONENT_RE.findall(total.group(4)):
+            if float(size) > 0:
+                placement[name] = "GPU" if where == "VRAM" else where
+    for name, size, device in LOAD_PARAMS_RE.findall(log):
+        if float(size) > 0:
+            placement[name] = "GPU" if ROCM_DEVICE_RE.match(device) else device
     return {
         "devices": devices,
-        "params_vram_mb": float(params.group(2)) if params else None,
-        "params_ram_mb": float(params.group(3)) if params else None,
-        "components": components,
-        "compute_buffers": compute[:10],
-        "auto_fit_backend": auto_fit.group(1) if auto_fit else None,
+        "params_buffers": params,
+        "compute_buffers": compute,
+        "placement": placement,
     }
 
 
@@ -561,42 +603,57 @@ def check_gpu_did_work(server):
     This is the check the tier exists for. Every other check here passes
     happily when stable-diffusion.cpp has fallen back to the CPU.
 
-    All of these must hold: a ROCm device was found; every model component
-    with weights (text encoders, diffusion model, VAE) had them placed in VRAM;
-    and at least one compute buffer was allocated in VRAM on a ROCm device,
-    which only happens once a graph really runs there. The device patterns
-    match any device index (ROCm0, ROCm1, ...), so a runner with two GPUs passes
-    as long as all the work landed on GPUs.
+    All of these must hold: a ROCm device was found; the model's weights were
+    placed in VRAM on a ROCm device, and none of them on the CPU; and at least
+    one compute buffer was allocated in VRAM on a ROCm device, which only
+    happens once a graph really runs there. If this upstream also prints a
+    per-component placement summary, every component in it must be on a GPU.
+    The device patterns match any device index (ROCm0, ROCm1, ...), so a runner
+    with two GPUs passes as long as all the work landed on GPUs.
     """
     log = server.log_text()
-    details = gpu_evidence(log)
+    evidence = gpu_evidence(log)
+    on_gpu = [b for b in evidence["params_buffers"]
+              if b["memory"] == "VRAM" and ROCM_DEVICE_RE.match(b["device"]) and b["mb"] > 0]
+    off_gpu = [b for b in evidence["params_buffers"]
+               if not (b["memory"] == "VRAM" and ROCM_DEVICE_RE.match(b["device"]))]
+    not_on_gpu = sorted(n for n, where in evidence["placement"].items() if where != "GPU")
+    # The verdict uses every line; the report keeps the first few of each.
+    details = {**evidence,
+               "params_buffers": evidence["params_buffers"][:10],
+               "params_buffer_count": len(evidence["params_buffers"]),
+               "compute_buffers": evidence["compute_buffers"][:10],
+               "compute_buffer_count": len(evidence["compute_buffers"])}
+
     problems = []
     if not details["devices"]:
         problems.append("no ROCm device was detected")
-    if not details["params_vram_mb"]:
-        problems.append("no model weights were placed in VRAM")
-    in_ram = [n for n, c in details["components"].items() if c["mb"] > 0 and c["memory"] != "VRAM"]
-    if in_ram:
-        problems.append(f"{', '.join(in_ram)} weights were placed in RAM, not VRAM")
-    if not any(c["mb"] > 0 for c in details["compute_buffers"]):
+    if not on_gpu:
+        problems.append("no model weights were placed in VRAM on a ROCm device")
+    if off_gpu:
+        problems.append(f"{len(off_gpu)} weight buffer(s) were placed in RAM on the CPU")
+    if not_on_gpu:
+        problems.append(f"{', '.join(not_on_gpu)} weights were not placed on the GPU")
+    if not any(c["mb"] > 0 for c in evidence["compute_buffers"]):
         problems.append("no compute buffer was allocated in VRAM on a ROCm device")
     if not problems:
         print("GPU confirmed by:")
         for device in details["devices"]:
             print(f"    Device {device['index']}: {device['name']}, {device['gfx']}")
-        print(f"    weights: VRAM {details['params_vram_mb']} MB, RAM {details['params_ram_mb']} MB")
+        for buffer in on_gpu[:3]:
+            print(f"    weights: {buffer['mb']} MB in VRAM on {buffer['device']}")
         for buffer in details["compute_buffers"][:3]:
             print(f"    {buffer['graph']} compute buffer: {buffer['mb']} MB in VRAM on {buffer['device']}")
         return (report.STATUS_PASS, None, details)
 
     details["cpu_fallback_hints"] = [p.pattern for p in CPU_FALLBACK_HINTS if p.search(log)]
     details["log_tail"] = log[-3000:]
-    # The compute-buffer lines are verbose-only: when everything else points at
-    # the GPU, the likelier cause is a log level too low to print them.
-    if details["devices"] and details["params_vram_mb"] and not in_ram and "[V]" not in log:
-        return (report.STATUS_FAIL, "the weights were placed in VRAM but no compute buffer was "
-                "logged, and the log has no verbose ([V]) lines at all: sd-server was not "
-                f"started with {SERVER_ARGS}, so the evidence was never printed", details)
+    # The weight and compute-buffer lines are verbose-only: when a GPU was found
+    # but the log has no verbose lines at all, the likelier cause is the log level.
+    if details["devices"] and "[V]" not in log:
+        return (report.STATUS_FAIL, "a ROCm device was found but the log has no verbose ([V]) "
+                f"lines at all: sd-server was not started with {SERVER_ARGS}, so the "
+                "evidence was never printed", details)
     return (report.STATUS_FAIL, f"GPU was NOT used -- {'; '.join(problems)}. This is silent "
             "at run time: sd-server still returns an image, just from the CPU.", details)
 
@@ -771,7 +828,8 @@ def main():
     if not args.rocm_version:
         parser.error("--rocm-version is required when --meta is not given")
 
-    rocm_dirs = [d for d in args.rocm_dirs.split(os.pathsep) if d]
+    # Absolute, because sd-server runs from the archive folder, not from here.
+    rocm_dirs = [os.path.abspath(d) for d in args.rocm_dirs.split(os.pathsep) if d]
     if not rocm_dirs:
         raise SystemExit(
             "::error::No ROCm runtime directories supplied. These archives do not "
@@ -819,7 +877,7 @@ def main():
 
     try:
         # Another server already on this port would answer in place of the one under test.
-        if http_get(f"{base}/", timeout=3)[0] is not None:
+        if port_in_use(args.port):
             tier.add("T1.1", "server boot", report.STATUS_FAIL,
                      error=f"port {args.port} is already in use by another process",
                      details={"port": args.port})

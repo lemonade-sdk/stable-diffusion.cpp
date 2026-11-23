@@ -564,6 +564,8 @@ jobs:
       VULKAN_VERSION: 1.4.328.1
 
     strategy:
+      # Each build is published as its own family, so one failing must not cancel the others.
+      fail-fast: false
       matrix:
         include:
           - build: "cpu"
@@ -1336,15 +1338,24 @@ jobs:
         run: pkill -f "${RUNNER_TEMP}/tier1-[^ ]*/sd-server" || true
 
   release:
-    # always() so a failed build leg does not skip the release: the per-family
-    # checks below decide what is complete and safe to publish.
+    # !cancelled() so a failed build leg does not skip the release -- the per-family
+    # checks below decide what is complete and safe to publish -- while a run
+    # cancelled before this job starts publishes nothing. A cancel during the upload
+    # leaves what was already uploaded; the next nightly sees the gap and refills it.
     if: >-
-      ${{ always() && needs.resolve-upstream.result == 'success' &&
+      ${{ !cancelled() && needs.resolve-upstream.result == 'success' &&
           needs.resolve-upstream.outputs.skip != 'true' &&
           (github.event_name == 'schedule' || github.event.inputs.create_release == 'true') }}
 
     permissions:
       contents: write
+
+    # Two runs on the same tag (a manual release overlapping the nightly) would
+    # otherwise upload into one release at once and could pair one run's
+    # qualification record with the other run's archive. The second one waits.
+    concurrency:
+      group: release-${{ needs.resolve-upstream.outputs.tag }}
+      cancel-in-progress: false
 
     runs-on: ubuntu-24.04
 
@@ -1422,6 +1433,8 @@ jobs:
         run: |
           shopt -s nullglob
           mkdir -p fragments
+          # Only this attempt's final checks count, never ones downloaded from an earlier attempt.
+          rm -f fragments/tier0-final-*.json
           checked=""
           for archive in artifact/sd-"${BRANCH_NAME}-${SHORT}"-bin-*-rocm-*.zip; do
             base=$(basename "$archive")
@@ -1434,6 +1447,16 @@ jobs:
               || echo "::error::check_final.py crashed on $base, so T0.12 will show as missing"
           done
           echo "archives=$checked" >> "$GITHUB_OUTPUT"
+
+      # So publish-qualification can still see T0.12 if this job stops before writing records.
+      - name: Upload final-archive reports
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualify-fragments-final
+          path: fragments/tier0-final-*.json
+          if-no-files-found: ignore
 
       - name: Qualify ROCm release artifacts
         id: qualify
@@ -1604,6 +1627,8 @@ jobs:
               if (records.includes(recordFor(file))) await uploadRecord(recordFor(file));
               await upload(file, fs.readFileSync(`./artifact/${file}`));
               uploaded.push(file);
+              // Written after every upload, so a later failure still reports what did ship.
+              core.setOutput('rocm', uploaded.filter((f) => /-rocm-/.test(f)).join(' '));
             }
             // Records of withheld archives say why they were withheld.
             for (const record of records) {
@@ -1668,7 +1693,7 @@ jobs:
   # checked and found nothing new (index.json "last_check"). The branch is created on the first publish.
   publish-qualification:
     if: >-
-      ${{ always() && needs.resolve-upstream.result == 'success' &&
+      ${{ !cancelled() && needs.resolve-upstream.result == 'success' &&
           (needs.resolve-upstream.outputs.skip == 'true' ||
            needs.release.result == 'success' || needs.release.result == 'failure') }}
     needs:
@@ -1725,7 +1750,8 @@ jobs:
             --records-dir ./records \
             --output-summary ./records/qualification-summary.json \
             --operating-systems "$ROCM_OPERATING_SYSTEMS" \
-            --rocm-versions "$ROCM_VERSIONS"
+            --rocm-versions "$ROCM_VERSIONS" \
+            --require-final
 
       - name: Read build job results
         if: needs.resolve-upstream.outputs.skip != 'true'

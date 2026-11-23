@@ -115,8 +115,13 @@ def runtime_dirs(venv_dir):
     site = site_packages(venv_dir)
     dirs = []
     for pkg in sorted(glob.glob(os.path.join(site, "_rocm_sdk_*"))):
+        # rocm_sysdeps holds TheRock's own copies of system libraries (libelf,
+        # libdrm, libnuma, ...) that the Linux HIP runtime loads through its
+        # RUNPATH. Listing it here is what lets Tier 1's T1.6 recognise them as
+        # part of the user's ROCm install.
         for sub in ("bin", "lib", os.path.join("lib", "llvm", "bin"),
-                    os.path.join("lib", "llvm", "lib")):
+                    os.path.join("lib", "llvm", "lib"),
+                    os.path.join("lib", "rocm_sysdeps", "lib")):
             candidate = os.path.join(pkg, sub)
             if os.path.isdir(candidate) and candidate not in dirs:
                 dirs.append(candidate)
@@ -141,8 +146,10 @@ def main():
 
     # Resolved here rather than by the caller so the command line stays free of
     # shell variables, which are spelled differently in bash and PowerShell.
-    prefix = args.prefix or os.path.join(
-        os.environ.get("RUNNER_TEMP") or tempfile.gettempdir(), "rocm-qual")
+    # Absolute, because the directories end up on the library search path of a
+    # program started from a different working directory.
+    prefix = os.path.abspath(args.prefix or os.path.join(
+        os.environ.get("RUNNER_TEMP") or tempfile.gettempdir(), "rocm-qual"))
 
     major = args.version.split(".")[0]
     index = args.index_url or INDEX_BY_MAJOR.get(major)

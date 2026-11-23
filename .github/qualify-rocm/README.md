@@ -97,7 +97,7 @@ been packaged.
 | T0.4 | the CPU backend variants are present (Linux; Windows links the CPU backend in) | yes |
 | T0.5 | every library the archive needs is either inside it, part of the OS, or a ROCm library | yes |
 | T0.6 | the archive still runs on the oldest Linux release we support | yes |
-| T0.7 | no build-machine paths left inside the binaries | yes |
+| T0.7 | no build-machine folder left in the Linux binaries' library search path (RUNPATH): only `$ORIGIN` | yes |
 | T0.8 | `sd-server` still accepts the flags Lemonade launches it with | yes |
 | T0.9 | `sd-server` reports the upstream commit this run pinned | yes |
 | T0.10 | the ROCm libraries the archive needs exist in the ROCm a user installs | yes |
@@ -182,12 +182,13 @@ operating system is audited against exactly what it was compiled for.
 Two things make this harder than it looks, and both have to be handled or T1.2
 reports the wrong answer.
 
-**The server leaves out half the evidence by default.** At its default log
-level sd-server reports which device it found and where it put the weights, but
-not where it ran anything. That is why Tier 1 launches it with `-v`, as Lemonade
-does in CI. Without that flag T1.2 finds no compute buffers and fails a
-perfectly good build — and says so, naming the missing flag. T0.8 checks every
-night that `-v` still exists.
+**The server leaves out most of the evidence by default.** At its default log
+level sd-server reports which device it found, but none of the weight-buffer and
+compute-buffer lines T1.2 requires (older upstream versions also printed a
+weight-placement summary at that level, newer ones do not). That is why Tier 1 launches it with `-v`, which
+Lemonade itself passes only in debug mode (as its CI runs it). Without that
+flag T1.2 finds no evidence and fails a perfectly good build — and says so,
+naming the missing flag. T0.8 checks every night that `-v` still exists.
 
 **The obvious evidence is not evidence.** stable-diffusion.cpp prints:
 
@@ -199,27 +200,34 @@ It is the line Lemonade's own validator looks for, but it is printed *before*
 the device is started, so it also appears when the device then fails to
 initialise and everything falls back to the CPU.
 
-So T1.2 requires all three of these, each naming a GPU or VRAM, which cannot
-appear unless a ROCm device was found and used:
+So T1.2 requires all three of these, each naming a ROCm device or VRAM, which
+cannot appear unless a ROCm device was found and used:
 
 ```
   Device 0: AMD Radeon(TM) 8060S Graphics, gfx1151 (0x1151), VMM: no, ...
-[I] total params memory size = 1929.50MB (VRAM 1929.50MB, RAM 0.00MB): text_encoders 358.79MB(VRAM), diffusion_model 1411.02MB(VRAM), vae 159.68MB(VRAM), ...
+[V] model manager prepared params backend buffers (1411.07 MB, 686 tensors, 2 blocks, VRAM) on ROCm0
 [V] unet compute buffer size: 87.86 MB(VRAM) on ROCm0 (peak across 1 segment)
 ```
 
-Every model component with weights must be in VRAM, not just some, and the
-compute buffer must be larger than zero. The patterns match any device index
-(`ROCm0`, `ROCm1`, …), so a machine with two GPUs passes as long as all the work
-landed on GPUs.
+The weights must be in VRAM on a ROCm device with none of them left on the CPU,
+and the compute buffer must be larger than zero. The patterns match any device
+index (`ROCm0`, `ROCm1`, …), so a machine with two GPUs passes as long as all
+the work landed on GPUs.
+
+These three were picked because upstream kept them while it changed its other
+logging. Upstream also prints a per-component placement summary, but has
+already renamed it once — `total params memory size = … (VRAM …, RAM …)` up to
+master-1106, `load_unet: 1411.02 MiB params -> ROCm0` from master-1117 — and a
+check that required it failed every good build the night it changed. So that
+summary is only extra evidence: recorded when present, and a failure only if it
+shows a component on the CPU.
 
 The same sd-server with the GPU hidden prints instead:
 
 ```
 ggml_cuda_init: failed to initialize ROCm: no ROCm-capable device is detected
-[W] auto-fit: no GPU devices; using the default backend
-[I] total params memory size = 1929.50MB (VRAM 0.00MB, RAM 1929.50MB): text_encoders 358.79MB(RAM), ...
-[V] unet compute buffer size: 123.14 MB(RAM) on CPU (peak across 1 segment)
+[V] model manager prepared params backend buffers (1411.02 MB, 686 tensors, 1 blocks, RAM) on CPU
+[V] unet compute buffer size: 1.93 MB(RAM) on CPU (peak across 1 segment)
 ```
 
 and still returns a valid image. T1.2 fails it on every count.
@@ -258,8 +266,13 @@ first checks whether the release for its tag already holds every backend family
 and `checksums.txt`; if it does, the whole run is skipped, and only a
 `last_check` of `"unchanged"` is written to the feed. If the release is missing
 anything — say ROCm 10.2 was withheld the night before — the nightly rebuilds,
-re-qualifies, and uploads only what is missing. An asset already in a release is
-never replaced, because Lemonade may already be pinned to it.
+re-qualifies, and uploads only the archives that are missing. An archive already
+in a release is never replaced, because Lemonade may already be pinned to it.
+`checksums.txt` is rebuilt from GitHub's own digests on every run. When the run
+re-qualifies an archive that is still withheld, its qualification record is
+replaced with the new one (an archive whose build produced no report this run
+keeps its previous record); the record of an archive that shipped is never
+touched.
 
 ## Running by hand
 
@@ -299,9 +312,12 @@ python3 .github/qualify-rocm/tier1_gpu.py \
     --output tier1.json
 ```
 
-Running the GPU check with `HIP_VISIBLE_DEVICES=-1` set on sd-server is a
-useful sanity check on T1.2 itself: sd-server still returns an image, and T1.2
-must fail.
+A useful sanity check on T1.2 itself is to start sd-server by hand the same way
+(the ROCm folders first on `PATH` or `LD_LIBRARY_PATH`, `-v`) with
+`HIP_VISIBLE_DEVICES=-1` set: it still returns an image, but its log has none of
+the three lines above. Setting the variable around `tier1_gpu.py` does nothing,
+because the script deliberately removes it (and the other settings listed in
+`FOREIGN_ROCM_ENV`) before starting sd-server.
 
 Each run writes a `qualification-<archive>.json` record that is attached to the
 release. It lists which gfx targets the archive contains code for, which of them

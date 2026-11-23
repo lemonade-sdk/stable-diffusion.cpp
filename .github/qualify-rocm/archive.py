@@ -7,7 +7,8 @@ systems pack them differently: the Windows zip is flat, while the Linux zip
 holds build/bin/ with its versioned library names stored as symlinks. Rather
 than encode either layout, extract() returns whichever folder sd-server landed
 in -- the same thing Lemonade does when it searches the extracted folder for
-sd-server.
+sd-server. Without sd-server it returns the folder holding the rest of the
+build, so the caller can report what is missing.
 
 Every entry is checked to stay inside the destination, so a damaged or hostile
 archive cannot write anywhere else.
@@ -19,10 +20,20 @@ import zipfile
 
 SERVER = {"ubuntu": "sd-server", "win": "sd-server.exe"}
 CLI = {"ubuntu": "sd-cli", "win": "sd-cli.exe"}
+# Files that mark the archive's binary folder when sd-server itself is missing.
+MARKERS = ("stable-diffusion.dll", "libstable-diffusion.so", "ggml.txt",
+           "stable-diffusion.cpp.txt", "sd-cli", "sd-cli.exe")
 
 
 def extract(archive, dest):
     """Extract `archive` into `dest` and return the folder holding sd-server.
+
+    Without sd-server, return the folder holding the rest of the build (one of
+    MARKERS), or else `dest`; callers check that sd-server exists.
+
+    Raises ValueError for a non-.zip archive or an entry or symlink that would
+    land outside `dest`, and whatever zipfile raises for a damaged zip
+    (BadZipFile, zlib.error, EOFError, NotImplementedError, ...).
 
     The Linux zip is made with `zip -y`, so its versioned .so names are stored as
     symlinks. zipfile.extractall would write them out as small text files the
@@ -51,7 +62,10 @@ def extract(archive, dest):
             if mode and not info.is_dir() and os.name != "nt":
                 os.chmod(target, stat.S_IMODE(mode) | stat.S_IRUSR)
 
-    for dirpath, _dirs, files in os.walk(dest):
-        if set(SERVER.values()) & set(files):
-            return dirpath
-    raise ValueError(f"sd-server not found anywhere inside {archive}")
+    # Without sd-server (say upstream renamed it) fall back to the folder holding
+    # the rest of the build, so Tier 0's T0.1 can report exactly what is missing.
+    for markers in (set(SERVER.values()), set(MARKERS)):
+        for dirpath, _dirs, files in os.walk(dest):
+            if markers & set(files):
+                return dirpath
+    return dest

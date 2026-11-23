@@ -2,9 +2,11 @@
 """
 Which release assets make up each backend family, and whether a family is complete.
 
-A family is a set of archives that only makes sense together: all eight CUDA
-architectures on every platform, the CPU builds for Linux and Windows, and so
-on. Each family ships as a complete set or not at all, so a consumer never
+A family is a set of archives that only makes sense together: the eight CUDA
+architectures on Linux x64 and Windows x64 plus the sm_121 (GB10) Linux arm64
+build, the CPU builds for Linux and Windows, and so on. Windows Vulkan and the
+all-architecture Windows CUDA 12 build (with its runtime zip) are families of
+their own, so a failure there never withholds the Linux builds. Each family ships as a complete set or not at all, so a consumer never
 finds half of one. Families are independent of each other, and each ROCm
 version is a family of its own -- a consumer downloads exactly one ROCm
 version, so a gap in 10.2 is no reason to withhold a good 10.0. What must stay
@@ -48,6 +50,10 @@ def families(branch, short, rocm_versions):
                                   f"{p}-bin-Linux-Ubuntu-24.04-x86_64-rocm-{version}.0.zip"]
     out["cpu"] = [f"{p}-bin-Linux-*-x86_64.zip", f"{p}-bin-win-cpu-x64.zip"]
     out["vulkan"] = [f"{p}-bin-Linux-*-x86_64-vulkan.zip"]
+    # Separate from Linux Vulkan, so a failed Windows build does not withhold Linux.
+    out["vulkan-win"] = [f"{p}-bin-win-vulkan-x64.zip"]
+    # The all-architecture Windows CUDA 12 build and the CUDA runtime it needs.
+    out["cuda12-win"] = [f"{p}-bin-win-cuda12-x64.zip", "cudart-sd-bin-win-cu12-x64.zip"]
     out["metal"] = [f"{p}-bin-Darwin-macOS-*-arm64.zip"]
     return out
 

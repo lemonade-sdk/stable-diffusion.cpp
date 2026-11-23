@@ -69,8 +69,12 @@ build_id = "<run_id>-<os>-rocm-<rocm_version>"     e.g. 45012345678-win-rocm-10.
 Unique per archive per run. Publishing is an upsert keyed on `build_id`. A
 re-run of a run keeps its `run_id`, so it replaces that run's rows and its
 `reports/` files instead of adding new ones; the latest attempt's values win,
-except that a row an earlier attempt marked `published` stays published (a
-re-run finds its archives already uploaded and has nothing to upload).
+except one: when an earlier attempt of the run already shipped an archive for
+the same tag and the re-run did not upload it again (it cannot replace a
+published asset), the earlier attempt's row and report are kept, because they
+describe the bytes users actually download. This needs the earlier attempt's
+own feed publish to have succeeded; if it did not, the re-run's row is
+published with `published: false`.
 `run_attempt` records which attempt published the rows. A new run has a new
 `run_id` and adds new rows.
 
@@ -283,8 +287,10 @@ Not in the feed:
   `cancelled`, `skipped`, or `unknown` when the run's job list could not be
   read. Each build ends on its own: one ROCm version failing does not cancel
   the others.
-- **`run_attempt`** is the attempt of the run that published the row. It is the
-  same on every row of a run.
+- **`run_attempt`** is the attempt of the run that published the row. Rows of
+  one run normally share it; a row kept from an earlier attempt that shipped
+  its archive keeps that attempt's number. For the run's latest attempt, read
+  `last_check.run_attempt`.
 - **`generated_at`** is when the row's record was written. A re-run writes it
   again, later than any run that started after it, so order runs by `run_id`
   (rows are already newest-run-first) rather than by `generated_at`.
@@ -314,7 +320,9 @@ An archive with no record at all gets a placeholder row. This happens when its
 build failed, so there was nothing to check, or when no check reported on it.
 In a placeholder row:
 
-- every test is `missing` except T0.12, which is `not_applicable`;
+- every test is `missing` except T0.12, which is `not_applicable` (or
+  `missing` in the rare case the archive reached the release job's final-archive
+  check but the check itself could not run, e.g. its metadata was lost);
   `tier0` and `tier1` are `missing`; `qualified`, `version_qualified` and
   `published` are `false`; and `overall` is `fail`;
 - `blocked_by` follows `build_result`: `build failed`, `build cancelled`,
@@ -342,6 +350,9 @@ decided.
 - **`run_id`**, **`run_attempt`**, **`run_url`**, **`event`** identify the run;
   **`checked_at`** is when it published.
 
+Like `latest/`, `last_check` never moves back: re-running an older run leaves a
+newer run's `last_check` in place.
+
 The freshest row in `builds` can therefore be days old while `last_check` is
 from this morning; that is the normal state when upstream is quiet.
 
@@ -354,7 +365,10 @@ The `qualification-<archive>.json` record exactly as `aggregate.py` wrote it (`k
   found in System32 or system ROCm),
 - `overall`,
 - `promoted`,
-- `promotion.blocked_by`,
+- `promotion.blocked_by` (why this archive did not qualify) and
+  `promotion.version_blocked_by` (why its ROCm version was withheld because of
+  the other archive, e.g. `["win: tier1=fail"]` or `["win: no report"]`, so an
+  archive that passed its own checks but did not ship still says why),
 - raw `counts`,
 - the `gfx` audit, and
 - `tiers` with every test.

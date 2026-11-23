@@ -95,6 +95,21 @@ def published_name(tag, os_name, rocm_version):
     return None
 
 
+def tier_reported(record, tier):
+    """Whether a tier's own job reported on this archive.
+
+    The release job's final-archive check (T0.12) is filed under tier0 too, so a
+    tier0 bucket holding nothing else means the Tier 0 job itself never ran.
+    The gate, the job summary and the feed all use this one rule.
+    """
+    bucket = record.get("tiers", {}).get(tier)
+    if not bucket:
+        return False
+    if tier == "tier0":
+        return bool({t.get("id") for t in bucket.get("tests", [])} - {"T0.12"})
+    return True
+
+
 def decide(record, require_final=False):
     """Return (publishable, reasons) for one archive's merged record."""
     reasons = []
@@ -102,9 +117,7 @@ def decide(record, require_final=False):
     tier0_ids = {t.get("id") for t in tiers.get("tier0", {}).get("tests", [])}
 
     for tier in ("tier0", "tier1"):
-        # T0.12 comes from the release job, so a Tier 0 bucket holding nothing
-        # else means the Tier 0 job itself never reported.
-        if tier not in tiers or (tier == "tier0" and not tier0_ids - {"T0.12"}):
+        if not tier_reported(record, tier):
             reasons.append(f"{tier} missing")
         elif tiers[tier]["status"] == report.STATUS_FAIL:
             reasons.append(f"{tier}=fail")
@@ -130,10 +143,20 @@ def gfx_summary(record):
         target = record.get("build", {}).get("gfx_target")
         if target:
             validated = [target]
+    expected = details.get("expected", [])
+    # T0.3 also audits other binaries with GPU code of their own
+    # (libstable-diffusion.so); a target any of them lacks is missing too.
+    missing = set(details.get("missing", []))
+    for other in (details.get("other_binaries") or {}).values():
+        if other.get("present_count"):
+            missing.update(other.get("missing", []))
+    present = details.get("present", [])
+    if missing - set(details.get("missing", [])):
+        present = [t for t in present if t not in missing]
     return {
-        "requested": details.get("expected", []),
-        "present_in_binary": details.get("present", []),
-        "missing_from_binary": details.get("missing", []),
+        "requested": expected,
+        "present_in_binary": present,
+        "missing_from_binary": [t for t in expected if t in missing] + sorted(missing - set(expected)),
         "hardware_validated": validated,
     }
 
@@ -150,8 +173,8 @@ def write_step_summary(records, promote_all, missing=()):
         build = record["build"]
         tiers = record.get("tiers", {})
         gfx = record["gfx"]
-        t0 = tiers.get("tier0", {}).get("status", "missing").upper()
-        t1 = tiers.get("tier1", {}).get("status", "not run").upper()
+        t0 = (tiers["tier0"]["status"] if tier_reported(record, "tier0") else "missing").upper()
+        t1 = (tiers["tier1"]["status"] if tier_reported(record, "tier1") else "missing").upper()
         hw = ", ".join(gfx["hardware_validated"]) or "none"
         lines.append(
             f"| `{build.get('artifact')}` | {t0} | {t1} | "
@@ -229,6 +252,38 @@ def main():
         record["gfx"] = gfx_summary(record)
         records.append(record)
 
+    # A ROCm version is publishable only when every archive carrying it passed.
+    # Versions are independent, so one bad version never withholds the others.
+    by_version = {}
+    for record in records:
+        version = record["build"].get("rocm_version") or "?"
+        by_version.setdefault(version, []).append(record)
+    blocked = {v for v, group in by_version.items()
+               if not all(r["promoted"] for r in group)}
+    # An archive with no report at all cannot ship, so neither can its version.
+    missing = [(o, v) for o, v in expected if (o, v) not in grouped]
+    for os_name, rocm_version in missing:
+        print(f"::error::No qualification report at all for {os_name} ROCm {rocm_version}.")
+        blocked.add(rocm_version)
+    blocked = sorted(blocked)
+    promote_all = bool(records) and not blocked
+
+    for record in records:
+        build = record["build"]
+        version = build.get("rocm_version") or "?"
+        # Why the version as a whole was withheld, so the record of an archive
+        # that passed its own checks still says why it did not ship.
+        record["promotion"]["version_blocked_by"] = [
+            f"{other['build'].get('os')}: {reason}"
+            for other in by_version.get(version, []) if other is not record
+            for reason in other["promotion"]["blocked_by"]
+        ] + [f"{o}: no report" for o, v in missing if v == version]
+
+    for record in records:
+        os_name = record["build"].get("os")
+        rocm_version = record["build"].get("rocm_version")
+        promote = record["promoted"]
+        reasons = record["promotion"]["blocked_by"]
         artifact = record["build"].get("artifact") or f"{os_name}-rocm-{rocm_version}"
         if args.records_dir:
             os.makedirs(args.records_dir, exist_ok=True)
@@ -248,22 +303,6 @@ def main():
               f"gfx={len(record['gfx']['present_in_binary'])}/"
               f"{len(record['gfx']['requested'])} "
               f"hw_validated={record['gfx']['hardware_validated'] or 'none'}")
-
-    # A ROCm version is publishable only when every archive carrying it passed.
-    # Versions are independent, so one bad version never withholds the others.
-    by_version = {}
-    for record in records:
-        version = record["build"].get("rocm_version") or "?"
-        by_version.setdefault(version, []).append(record)
-    blocked = {v for v, group in by_version.items()
-               if not all(r["promoted"] for r in group)}
-    # An archive with no report at all cannot ship, so neither can its version.
-    missing = [(o, v) for o, v in expected if (o, v) not in grouped]
-    for os_name, rocm_version in missing:
-        print(f"::error::No qualification report at all for {os_name} ROCm {rocm_version}.")
-        blocked.add(rocm_version)
-    blocked = sorted(blocked)
-    promote_all = bool(records) and not blocked
 
     write_step_summary(records, promote_all, missing)
 

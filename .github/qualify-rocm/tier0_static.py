@@ -36,7 +36,8 @@ Checks:
                                       a newer C library than the oldest
                                       distribution we support.
   T0.7  library search path        -- Linux only. No absolute build-machine
-                                      paths baked into the binaries.
+                                      folder in the binaries' library search
+                                      path (RUNPATH/RPATH); only $ORIGIN.
   T0.8  sd-server flag surface     -- the flags Lemonade launches sd-server
                                       with, and the one Tier 1 relies on, are
                                       all still accepted (needs --run-binaries).
@@ -161,8 +162,9 @@ SUPPORTED_DISTRO = "Ubuntu 24.04"
 # a day rather than surfacing as a Lemonade bug.
 LEMONADE_SERVER_FLAGS = [
     "--listen-port", "-m", "--model", "--diffusion-model", "--llm", "--vae",
-    # Raises the log level to verbose. Listed because Tier 1 depends on it:
-    # without it sd-server never prints its compute buffers, and the GPU check
+    # Raises the log level to verbose. Lemonade passes it only in debug mode, but
+    # it is listed because Tier 1 depends on it: without it sd-server never
+    # prints where it put the weights or its compute buffers, and the GPU check
     # has nothing to inspect. If upstream renames it, failing here names the
     # cause instead of leaving Tier 1 to report a confusing absence of evidence.
     "-v",
@@ -632,6 +634,22 @@ def check_bundled_runtime(root, os_name, rocm_dirs):
     return (report.STATUS_PASS, None, details)
 
 
+# Every check this script runs, in order. T0.12 comes from check_final.py.
+TIER0_CHECKS = [
+    ("T0.1", "archive contents"),
+    ("T0.2", "HIP code present"),
+    ("T0.3", "gfx target audit"),
+    ("T0.4", "CPU backend variants"),
+    ("T0.5", "runtime dependency survey"),
+    ("T0.6", "Linux version support"),
+    ("T0.7", "library search path"),
+    ("T0.8", "sd-server flag surface"),
+    ("T0.9", "upstream provenance"),
+    ("T0.10", "ROCm dependency resolution"),
+    ("T0.11", "bundled HIP runtime matches ROCm"),
+]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tier 0 static archive verification")
     parser.add_argument("--meta", help="qualify-meta-*.json written by the build job")
@@ -668,7 +686,8 @@ def main():
     if not os.path.exists(args.archive):
         raise SystemExit(f"::error::archive not found: {args.archive}")
 
-    rocm_dirs = [d for d in args.rocm_dirs.split(os.pathsep) if d]
+    # Absolute, because --run-binaries starts sd-server from the archive folder.
+    rocm_dirs = [os.path.abspath(d) for d in args.rocm_dirs.split(os.pathsep) if d]
     tier = report.TierReport("tier0", report.build_meta(
         artifact=os.path.basename(args.archive), os_name=args.os_name,
         rocm_version=args.rocm_version, sdcpp_tag=args.tag, upstream_sha=args.upstream_sha,
@@ -676,27 +695,34 @@ def main():
 
     workdir = tempfile.mkdtemp(prefix="tier0-", dir=os.environ.get("RUNNER_TEMP") or None)
     try:
-        root = archive.extract(args.archive, workdir)
-        print(f"Extracted {args.archive} -> {root} ({len(listing(root))} entries)")
-        help_run = ServerHelp(root, args.os_name, args.run_binaries, rocm_dirs)
-
-        tier.run("T0.1", "archive contents", lambda: check_contents(root, args.os_name))
-        tier.run("T0.2", "HIP code present", lambda: check_hip_code(root, args.os_name))
-        tier.run("T0.3", "gfx target audit",
-                 lambda: check_gfx_targets(root, args.os_name, args.gpu_targets))
-        tier.run("T0.4", "CPU backend variants", lambda: check_cpu_variants(root, args.os_name))
-        tier.run("T0.5", "runtime dependency survey",
-                 lambda: check_dependencies(root, args.os_name))
-        tier.run("T0.6", "Linux version support",
-                 lambda: check_linux_version_support(root, args.os_name))
-        tier.run("T0.7", "library search path", lambda: check_rpath(root, args.os_name))
-        tier.run("T0.8", "sd-server flag surface", lambda: check_server_flags(help_run))
-        tier.run("T0.9", "upstream provenance",
-                 lambda: check_provenance(help_run, args.upstream_sha))
-        tier.run("T0.10", "ROCm dependency resolution",
-                 lambda: check_rocm_dependencies(root, args.os_name, rocm_dirs))
-        tier.run("T0.11", "bundled HIP runtime matches ROCm",
-                 lambda: check_bundled_runtime(root, args.os_name, rocm_dirs))
+        try:
+            root = archive.extract(args.archive, workdir)
+        except Exception as exc:  # noqa: BLE001 - any failure here is the finding
+            # Still write a report, so the record says why instead of "no report".
+            tier.add("T0.1", "archive contents", report.STATUS_FAIL,
+                     error=f"the archive cannot be extracted: {exc}")
+            root = None
+        if root is None:
+            for test_id, name in TIER0_CHECKS[1:]:
+                tier.add(test_id, name, report.STATUS_SKIP, error="archive could not be extracted")
+        else:
+            print(f"Extracted {args.archive} -> {root} ({len(listing(root))} entries)")
+            help_run = ServerHelp(root, args.os_name, args.run_binaries, rocm_dirs)
+            checks = {
+                "T0.1": lambda: check_contents(root, args.os_name),
+                "T0.2": lambda: check_hip_code(root, args.os_name),
+                "T0.3": lambda: check_gfx_targets(root, args.os_name, args.gpu_targets),
+                "T0.4": lambda: check_cpu_variants(root, args.os_name),
+                "T0.5": lambda: check_dependencies(root, args.os_name),
+                "T0.6": lambda: check_linux_version_support(root, args.os_name),
+                "T0.7": lambda: check_rpath(root, args.os_name),
+                "T0.8": lambda: check_server_flags(help_run),
+                "T0.9": lambda: check_provenance(help_run, args.upstream_sha),
+                "T0.10": lambda: check_rocm_dependencies(root, args.os_name, rocm_dirs),
+                "T0.11": lambda: check_bundled_runtime(root, args.os_name, rocm_dirs),
+            }
+            for test_id, name in TIER0_CHECKS:
+                tier.run(test_id, name, checks[test_id])
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 

@@ -93,11 +93,16 @@ def render(tag, repo, names, rocm_versions, summary):
                "attached `qualification-*.json` records list the failing checks."
                for v in rocm if v not in paired]
     if not any("-cuda-sm_" in n for n in names):
-        missing.append("- CUDA: at least one CUDA build failed, so no CUDA builds are included.")
+        missing.append("- CUDA (per-architecture builds): at least one CUDA architecture failed "
+                       "to build, so no per-architecture CUDA builds are included.")
     if not cpu_linux or "cpu" not in win:
         missing.append("- CPU: did not build.")
     if not vulkan_linux:
         missing.append("- Vulkan (Linux): did not build.")
+    if "vulkan" not in win:
+        missing.append("- Vulkan (Windows): did not build.")
+    if "cuda12" not in win:
+        missing.append("- CUDA 12, all architectures (Windows): did not build.")
     if not metal:
         missing.append("- Metal: did not build.")
 
