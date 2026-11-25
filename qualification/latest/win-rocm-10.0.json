@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "kind": "qualification_record",
-  "generated_at": "2026-11-23T16:48:47Z",
+  "generated_at": "2026-11-25T12:33:32Z",
   "build": {
-    "build_id": "sd-master-5519d71-bin-win-rocm-10.0.0-x64.zip@45171893682",
+    "build_id": "sd-master-5519d71-bin-win-rocm-10.0.0-x64.zip@45391097191",
     "artifact": "sd-master-5519d71-bin-win-rocm-10.0.0-x64.zip",
     "os": "win",
     "rocm_version": "10.0",
-    "sdcpp_tag": "master-1117-5519d71",
-    "upstream_sha": "0d71f963af9c94941f4a67e8ea145935651dd756",
+    "sdcpp_tag": "master-1122-5519d71",
+    "upstream_sha": "3b12781fac1a22eda27ad0f08d0884ef816f24d7",
     "gfx_target": "gfx1151",
     "hardware_validated": true,
-    "run_id": "45171893682",
+    "run_id": "45391097191",
     "run_attempt": "1",
     "runner_env": {
       "platform": "Windows-11-10.0.26200-SP0",
-      "machine_name": "sjlab-stx-halo-04",
+      "machine_name": "sjlab-stx-halo-05",
       "python": "3.12.10",
       "foreign_rocm_env_removed": {},
       "gpu_drivers": [
@@ -81,7 +81,7 @@
           "details": {
             "binary": "stable-diffusion.dll",
             "exists": true,
-            "bytes": 1169729024
+            "bytes": 1170155520
           }
         },
         {
@@ -90,12 +90,12 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 14467,
+          "duration_ms": 18687,
           "error": null,
           "details": {
             "binary": "stable-diffusion.dll",
-            "bytes_scanned": 1169729024,
-            "bundle_magic_count": 150,
+            "bytes_scanned": 1170155520,
+            "bundle_magic_count": 151,
             "expected_count": 20,
             "present_count": 20,
             "expected": [
@@ -145,26 +145,26 @@
             "missing": [],
             "extra": [],
             "entries_per_target": {
-              "gfx1010": 150,
-              "gfx1011": 150,
-              "gfx1012": 150,
-              "gfx1030": 150,
-              "gfx1031": 150,
-              "gfx1032": 150,
-              "gfx1033": 150,
-              "gfx1034": 150,
-              "gfx1035": 150,
-              "gfx1036": 150,
-              "gfx1100": 150,
-              "gfx1101": 150,
-              "gfx1102": 150,
-              "gfx1103": 150,
-              "gfx1150": 150,
-              "gfx1151": 150,
-              "gfx1152": 150,
-              "gfx1153": 150,
-              "gfx1200": 150,
-              "gfx1201": 150
+              "gfx1010": 151,
+              "gfx1011": 151,
+              "gfx1012": 151,
+              "gfx1030": 151,
+              "gfx1031": 151,
+              "gfx1032": 151,
+              "gfx1033": 151,
+              "gfx1034": 151,
+              "gfx1035": 151,
+              "gfx1036": 151,
+              "gfx1100": 151,
+              "gfx1101": 151,
+              "gfx1102": 151,
+              "gfx1103": 151,
+              "gfx1150": 151,
+              "gfx1151": 151,
+              "gfx1152": 151,
+              "gfx1153": 151,
+              "gfx1200": 151,
+              "gfx1201": 151
             },
             "entry_count_uniform": true,
             "other_binaries": {}
@@ -186,7 +186,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 329,
+          "duration_ms": 343,
           "error": null,
           "details": {
             "binaries_scanned": 6,
@@ -226,11 +226,11 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 1281,
+          "duration_ms": 3062,
           "error": null,
           "details": {
             "returncode": 0,
-            "help_bytes": 21303,
+            "help_bytes": 21652,
             "flags_checked": 7,
             "flags_missing": []
           }
@@ -244,9 +244,9 @@
           "duration_ms": 0,
           "error": null,
           "details": {
-            "expected_upstream_sha": "0d71f963af9c94941f4a67e8ea145935651dd756",
-            "binary_version": "master-1117-0d71f96",
-            "binary_commit": "0d71f96"
+            "expected_upstream_sha": "3b12781fac1a22eda27ad0f08d0884ef816f24d7",
+            "binary_version": "master-1122-3b12781",
+            "binary_commit": "3b12781"
           }
         },
         {
@@ -255,7 +255,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 311,
+          "duration_ms": 375,
           "error": null,
           "details": {
             "rocm_dirs_searched": 5,
@@ -276,7 +276,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 235,
+          "duration_ms": 297,
           "error": null,
           "details": {
             "files": {
@@ -302,14 +302,14 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 3013,
+          "duration_ms": 3437,
           "error": null,
           "details": {
             "entries": 8,
             "missing": [],
-            "bytes": 275457925,
-            "sha256": "468e38423a61fbf4b261c5b6d51af84c496e13f561d42601a6c955fc92c468f9",
-            "expected_sha256": "468e38423a61fbf4b261c5b6d51af84c496e13f561d42601a6c955fc92c468f9"
+            "bytes": 275468790,
+            "sha256": "fbc648ce17fb66d79c725bf6ed634c4523a065551e16313b7ab695d7a25a8fc0",
+            "expected_sha256": "fbc648ce17fb66d79c725bf6ed634c4523a065551e16313b7ab695d7a25a8fc0"
           }
         }
       ]
@@ -429,7 +429,7 @@
           "tier": "tier1",
           "status": "pass",
           "gating": true,
-          "duration_ms": 141,
+          "duration_ms": 172,
           "error": null,
           "details": {
             "bytes": 576124,
@@ -439,7 +439,7 @@
             "pixel_mean": 89.8,
             "pixel_stddev": 45.54,
             "distinct_values": 253,
-            "request_seconds": 2.61,
+            "request_seconds": 2.8,
             "sha256": "4738d7b303f59cb153ed4aaa1411d6f6bdc9eb1b76c7c06547e3165688f94750"
           }
         },
@@ -463,10 +463,10 @@
           "tier": "tier1",
           "status": "pass",
           "gating": true,
-          "duration_ms": 15,
+          "duration_ms": 31,
           "error": null,
           "details": {
-            "archive_dir": "C:\\actions-runner\\_work\\_temp\\tier1-rz6hu25h\\x",
+            "archive_dir": "C:\\actions-runner\\_work\\_temp\\tier1-1_h8rj4b\\x",
             "bundled_in_archive": [
               "amd_comgr.dll",
               "amdhip64_7.dll",
@@ -479,9 +479,9 @@
               "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.0.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\origami.dll",
               "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.0.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\rocblas.dll",
               "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.0.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\rocsolver.dll",
-              "C:\\actions-runner\\_work\\_temp\\tier1-rz6hu25h\\x\\amd_comgr.dll",
-              "C:\\actions-runner\\_work\\_temp\\tier1-rz6hu25h\\x\\amdhip64_7.dll",
-              "C:\\actions-runner\\_work\\_temp\\tier1-rz6hu25h\\x\\rocm_kpack.dll"
+              "C:\\actions-runner\\_work\\_temp\\tier1-1_h8rj4b\\x\\amd_comgr.dll",
+              "C:\\actions-runner\\_work\\_temp\\tier1-1_h8rj4b\\x\\amdhip64_7.dll",
+              "C:\\actions-runner\\_work\\_temp\\tier1-1_h8rj4b\\x\\rocm_kpack.dll"
             ],
             "loaded_from_unexpected_place": []
           }
@@ -491,7 +491,9 @@
   },
   "promotion": {
     "blocked_by": [],
-    "version_blocked_by": []
+    "version_blocked_by": [
+      "ubuntu: tier1 missing"
+    ]
   },
   "gfx": {
     "requested": [

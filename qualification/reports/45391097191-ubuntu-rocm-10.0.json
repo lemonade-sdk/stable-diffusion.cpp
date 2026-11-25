@@ -1,0 +1,414 @@
+{
+  "schema_version": 1,
+  "kind": "qualification_record",
+  "generated_at": "2026-11-25T12:33:32Z",
+  "build": {
+    "build_id": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip@45391097191",
+    "artifact": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip",
+    "os": "ubuntu",
+    "rocm_version": "10.0",
+    "sdcpp_tag": "master-1122-5519d71",
+    "upstream_sha": "3b12781fac1a22eda27ad0f08d0884ef816f24d7",
+    "gfx_target": null,
+    "hardware_validated": false,
+    "run_id": "45391097191",
+    "run_attempt": "1"
+  },
+  "overall": "fail",
+  "promoted": false,
+  "counts": {
+    "pass": 11,
+    "fail": 0,
+    "warn": 0,
+    "skip": 1,
+    "total": 12
+  },
+  "tiers": {
+    "tier0": {
+      "status": "pass",
+      "tier_name": "Static artifact verification",
+      "counts": {
+        "pass": 11,
+        "fail": 0,
+        "warn": 0,
+        "skip": 1,
+        "total": 12
+      },
+      "tests": [
+        {
+          "id": "T0.1",
+          "name": "archive contents",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "entries": 39,
+            "missing": [],
+            "test_binaries_shipped": 0,
+            "test_binaries": []
+          }
+        },
+        {
+          "id": "T0.2",
+          "name": "HIP code present",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "binary": "libggml-hip.so",
+            "exists": true,
+            "bytes": 1340496400
+          }
+        },
+        {
+          "id": "T0.3",
+          "name": "gfx target audit",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 13060,
+          "error": null,
+          "details": {
+            "binary": "libggml-hip.so",
+            "bytes_scanned": 1340496400,
+            "bundle_magic_count": 141,
+            "expected_count": 24,
+            "present_count": 24,
+            "expected": [
+              "gfx1010",
+              "gfx1011",
+              "gfx1012",
+              "gfx1030",
+              "gfx1031",
+              "gfx1032",
+              "gfx1033",
+              "gfx1034",
+              "gfx1035",
+              "gfx1036",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1103",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1153",
+              "gfx1200",
+              "gfx1201",
+              "gfx908",
+              "gfx90a",
+              "gfx942",
+              "gfx950"
+            ],
+            "present": [
+              "gfx1010",
+              "gfx1011",
+              "gfx1012",
+              "gfx1030",
+              "gfx1031",
+              "gfx1032",
+              "gfx1033",
+              "gfx1034",
+              "gfx1035",
+              "gfx1036",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1103",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1153",
+              "gfx1200",
+              "gfx1201",
+              "gfx908",
+              "gfx90a",
+              "gfx942",
+              "gfx950"
+            ],
+            "missing": [],
+            "extra": [],
+            "entries_per_target": {
+              "gfx1010": 141,
+              "gfx1011": 141,
+              "gfx1012": 141,
+              "gfx1030": 141,
+              "gfx1031": 141,
+              "gfx1032": 141,
+              "gfx1033": 141,
+              "gfx1034": 141,
+              "gfx1035": 141,
+              "gfx1036": 141,
+              "gfx1100": 141,
+              "gfx1101": 141,
+              "gfx1102": 141,
+              "gfx1103": 141,
+              "gfx1150": 141,
+              "gfx1151": 141,
+              "gfx1152": 141,
+              "gfx1153": 141,
+              "gfx1200": 141,
+              "gfx1201": 141,
+              "gfx908": 141,
+              "gfx90a": 141,
+              "gfx942": 141,
+              "gfx950": 141
+            },
+            "entry_count_uniform": true,
+            "other_binaries": {
+              "libstable-diffusion.so": {
+                "present_count": 24,
+                "missing": [],
+                "extra": [],
+                "entry_count_uniform": true,
+                "bundle_magic_count": 10
+              }
+            }
+          }
+        },
+        {
+          "id": "T0.4",
+          "name": "CPU backend variants",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "count": 14,
+            "variants": [
+              "libggml-cpu-alderlake.so",
+              "libggml-cpu-cannonlake.so",
+              "libggml-cpu-cascadelake.so",
+              "libggml-cpu-cooperlake.so",
+              "libggml-cpu-haswell.so",
+              "libggml-cpu-icelake.so",
+              "libggml-cpu-ivybridge.so",
+              "libggml-cpu-piledriver.so",
+              "libggml-cpu-sandybridge.so",
+              "libggml-cpu-sapphirerapids.so",
+              "libggml-cpu-skylakex.so",
+              "libggml-cpu-sse42.so",
+              "libggml-cpu-x64.so",
+              "libggml-cpu-zen4.so"
+            ]
+          }
+        },
+        {
+          "id": "T0.5",
+          "name": "runtime dependency survey",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 1,
+          "error": null,
+          "details": {
+            "binaries_scanned": 25,
+            "rocm_runtime_required": [
+              "libamdhip64.so.7",
+              "libhipblas.so.3",
+              "libhipblaslt.so.1",
+              "librocblas.so.5"
+            ],
+            "unresolved": {}
+          }
+        },
+        {
+          "id": "T0.6",
+          "name": "Linux version support",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 1,
+          "error": null,
+          "details": {
+            "glibc_required": "2.38",
+            "glibc_allowed": "2.39",
+            "oldest_supported_distro": "Ubuntu 24.04",
+            "required_by": "libggml-base.so.1.0.0",
+            "per_file": {
+              "libggml-base.so.1.0.0": "2.38",
+              "libggml-cpu-alderlake.so": "2.38",
+              "libggml-cpu-cannonlake.so": "2.38",
+              "libggml-cpu-cascadelake.so": "2.38",
+              "libggml-cpu-cooperlake.so": "2.38",
+              "libggml-cpu-haswell.so": "2.38",
+              "libggml-cpu-icelake.so": "2.38",
+              "libggml-cpu-ivybridge.so": "2.38",
+              "libggml-cpu-piledriver.so": "2.38",
+              "libggml-cpu-sandybridge.so": "2.38",
+              "libggml-cpu-sapphirerapids.so": "2.38",
+              "libggml-cpu-skylakex.so": "2.38",
+              "libggml-cpu-sse42.so": "2.38",
+              "libggml-cpu-x64.so": "2.38",
+              "libggml-cpu-zen4.so": "2.38",
+              "libggml-hip.so": "2.38",
+              "libggml.so.1.0.0": "2.34",
+              "libsharpyuv.so.0.1.2": "2.29",
+              "libstable-diffusion.so": "2.38",
+              "libwebm.so": "2.33",
+              "libwebp.so.7.2.0": "2.34",
+              "libwebpdemux.so.2.0.17": "2.14",
+              "libwebpmux.so.3.1.2": "2.29",
+              "sd-cli": "2.38",
+              "sd-server": "2.38"
+            }
+          }
+        },
+        {
+          "id": "T0.7",
+          "name": "library search path",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 1,
+          "error": null,
+          "details": {
+            "leaked": {}
+          }
+        },
+        {
+          "id": "T0.8",
+          "name": "sd-server flag surface",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 89,
+          "error": null,
+          "details": {
+            "returncode": 0,
+            "help_bytes": 21671,
+            "flags_checked": 7,
+            "flags_missing": []
+          }
+        },
+        {
+          "id": "T0.9",
+          "name": "upstream provenance",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "expected_upstream_sha": "3b12781fac1a22eda27ad0f08d0884ef816f24d7",
+            "binary_version": "master-1122-3b12781",
+            "binary_commit": "3b12781"
+          }
+        },
+        {
+          "id": "T0.10",
+          "name": "ROCm dependency resolution",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 2,
+          "error": null,
+          "details": {
+            "rocm_dirs_searched": 6,
+            "files_available": 256,
+            "rocm_libraries_required": [
+              "libamdhip64.so.7",
+              "libhipblas.so.3",
+              "libhipblaslt.so.1",
+              "librocblas.so.5"
+            ],
+            "unresolved": {}
+          }
+        },
+        {
+          "id": "T0.11",
+          "name": "bundled HIP runtime matches ROCm",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "this archive bundles no ROCm library",
+          "details": {}
+        },
+        {
+          "id": "T0.12",
+          "name": "final archive integrity",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 3531,
+          "error": null,
+          "details": {
+            "entries": 39,
+            "missing": [],
+            "bytes": 290444408,
+            "sha256": "bf6939acf38c9c8179e883fbb065dd4dd09ae6c60885eb51dca09b9386a0c303",
+            "expected_sha256": "bf6939acf38c9c8179e883fbb065dd4dd09ae6c60885eb51dca09b9386a0c303"
+          }
+        }
+      ]
+    }
+  },
+  "promotion": {
+    "blocked_by": [
+      "tier1 missing"
+    ],
+    "version_blocked_by": []
+  },
+  "gfx": {
+    "requested": [
+      "gfx1010",
+      "gfx1011",
+      "gfx1012",
+      "gfx1030",
+      "gfx1031",
+      "gfx1032",
+      "gfx1033",
+      "gfx1034",
+      "gfx1035",
+      "gfx1036",
+      "gfx1100",
+      "gfx1101",
+      "gfx1102",
+      "gfx1103",
+      "gfx1150",
+      "gfx1151",
+      "gfx1152",
+      "gfx1153",
+      "gfx1200",
+      "gfx1201",
+      "gfx908",
+      "gfx90a",
+      "gfx942",
+      "gfx950"
+    ],
+    "present_in_binary": [
+      "gfx1010",
+      "gfx1011",
+      "gfx1012",
+      "gfx1030",
+      "gfx1031",
+      "gfx1032",
+      "gfx1033",
+      "gfx1034",
+      "gfx1035",
+      "gfx1036",
+      "gfx1100",
+      "gfx1101",
+      "gfx1102",
+      "gfx1103",
+      "gfx1150",
+      "gfx1151",
+      "gfx1152",
+      "gfx1153",
+      "gfx1200",
+      "gfx1201",
+      "gfx908",
+      "gfx90a",
+      "gfx942",
+      "gfx950"
+    ],
+    "missing_from_binary": [],
+    "hardware_validated": []
+  }
+}
