@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "kind": "qualification_record",
+  "generated_at": "2026-11-26T15:01:11Z",
+  "build": {
+    "build_id": "sd-master-5519d71-bin-win-rocm-10.1.0-x64.zip@45611333176",
+    "artifact": "sd-master-5519d71-bin-win-rocm-10.1.0-x64.zip",
+    "os": "win",
+    "rocm_version": "10.1",
+    "sdcpp_tag": "master-1127-5519d71",
+    "upstream_sha": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
+    "gfx_target": null,
+    "hardware_validated": false,
+    "run_id": "45611333176",
+    "run_attempt": "1"
+  },
+  "overall": "fail",
+  "promoted": false,
+  "counts": {
+    "pass": 9,
+    "fail": 0,
+    "warn": 0,
+    "skip": 3,
+    "total": 12
+  },
+  "tiers": {
+    "tier0": {
+      "status": "pass",
+      "tier_name": "Static artifact verification",
+      "counts": {
+        "pass": 9,
+        "fail": 0,
+        "warn": 0,
+        "skip": 3,
+        "total": 12
+      },
+      "tests": [
+        {
+          "id": "T0.1",
+          "name": "archive contents",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "entries": 8,
+            "missing": [],
+            "test_binaries_shipped": 0,
+            "test_binaries": []
+          }
+        },
+        {
+          "id": "T0.2",
+          "name": "HIP code present",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "binary": "stable-diffusion.dll",
+            "exists": true,
+            "bytes": 1188304384
+          }
+        },
+        {
+          "id": "T0.3",
+          "name": "gfx target audit",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 10546,
+          "error": null,
+          "details": {
+            "binary": "stable-diffusion.dll",
+            "bytes_scanned": 1188304384,
+            "bundle_magic_count": 151,
+            "expected_count": 20,
+            "present_count": 20,
+            "expected": [
+              "gfx1010",
+              "gfx1011",
+              "gfx1012",
+              "gfx1030",
+              "gfx1031",
+              "gfx1032",
+              "gfx1033",
+              "gfx1034",
+              "gfx1035",
+              "gfx1036",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1103",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1153",
+              "gfx1200",
+              "gfx1201"
+            ],
+            "present": [
+              "gfx1010",
+              "gfx1011",
+              "gfx1012",
+              "gfx1030",
+              "gfx1031",
+              "gfx1032",
+              "gfx1033",
+              "gfx1034",
+              "gfx1035",
+              "gfx1036",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1103",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1153",
+              "gfx1200",
+              "gfx1201"
+            ],
+            "missing": [],
+            "extra": [],
+            "entries_per_target": {
+              "gfx1010": 151,
+              "gfx1011": 151,
+              "gfx1012": 151,
+              "gfx1030": 151,
+              "gfx1031": 151,
+              "gfx1032": 151,
+              "gfx1033": 151,
+              "gfx1034": 151,
+              "gfx1035": 151,
+              "gfx1036": 151,
+              "gfx1100": 151,
+              "gfx1101": 151,
+              "gfx1102": 151,
+              "gfx1103": 151,
+              "gfx1150": 151,
+              "gfx1151": 151,
+              "gfx1152": 151,
+              "gfx1153": 151,
+              "gfx1200": 151,
+              "gfx1201": 151
+            },
+            "entry_count_uniform": true,
+            "other_binaries": {}
+          }
+        },
+        {
+          "id": "T0.4",
+          "name": "CPU backend variants",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "the Windows ROCm build links the CPU backend into stable-diffusion.dll",
+          "details": {}
+        },
+        {
+          "id": "T0.5",
+          "name": "runtime dependency survey",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 328,
+          "error": null,
+          "details": {
+            "binaries_scanned": 6,
+            "rocm_runtime_required": [
+              "amdhip64_7.dll",
+              "hipblas.dll",
+              "libhipblaslt.dll",
+              "rocm_kpack.dll"
+            ],
+            "unresolved": {}
+          }
+        },
+        {
+          "id": "T0.6",
+          "name": "Linux version support",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "Linux-only check",
+          "details": {}
+        },
+        {
+          "id": "T0.7",
+          "name": "library search path",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "Linux-only check",
+          "details": {}
+        },
+        {
+          "id": "T0.8",
+          "name": "sd-server flag surface",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 1139,
+          "error": null,
+          "details": {
+            "returncode": 0,
+            "help_bytes": 21652,
+            "flags_checked": 7,
+            "flags_missing": []
+          }
+        },
+        {
+          "id": "T0.9",
+          "name": "upstream provenance",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "expected_upstream_sha": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
+            "binary_version": "master-1127-79dc7ca",
+            "binary_commit": "79dc7ca"
+          }
+        },
+        {
+          "id": "T0.10",
+          "name": "ROCm dependency resolution",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 360,
+          "error": null,
+          "details": {
+            "rocm_dirs_searched": 5,
+            "files_available": 132,
+            "rocm_libraries_required": [
+              "amdhip64_7.dll",
+              "hipblas.dll",
+              "libhipblaslt.dll",
+              "rocm_kpack.dll"
+            ],
+            "unresolved": {}
+          }
+        },
+        {
+          "id": "T0.11",
+          "name": "bundled HIP runtime matches ROCm",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 218,
+          "error": null,
+          "details": {
+            "files": {
+              "amd_comgr.dll": {
+                "archive": "da9527847c99efd3df99bd46fe24abae7920b04df0f51e7c677abcccd4924e58",
+                "rocm": "da9527847c99efd3df99bd46fe24abae7920b04df0f51e7c677abcccd4924e58"
+              },
+              "amdhip64_7.dll": {
+                "archive": "f20e2065cee5889789bf73df0c2d1f4efb481e74ade30488c352fd65ad80ac83",
+                "rocm": "f20e2065cee5889789bf73df0c2d1f4efb481e74ade30488c352fd65ad80ac83"
+              },
+              "rocm_kpack.dll": {
+                "archive": "2e9734ffe6f6eefe1ff660a55dc85fffbcd2d66f794fce4878c6d95a55787b48",
+                "rocm": "2e9734ffe6f6eefe1ff660a55dc85fffbcd2d66f794fce4878c6d95a55787b48"
+              }
+            },
+            "problems": []
+          }
+        },
+        {
+          "id": "T0.12",
+          "name": "final archive integrity",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 3587,
+          "error": null,
+          "details": {
+            "entries": 8,
+            "missing": [],
+            "bytes": 284843784,
+            "sha256": "0e7fb397e4407649608264f11a5fff06fc0d1c25225b94773a493cc0243385c4",
+            "expected_sha256": "0e7fb397e4407649608264f11a5fff06fc0d1c25225b94773a493cc0243385c4"
+          }
+        }
+      ]
+    }
+  },
+  "promotion": {
+    "blocked_by": [
+      "tier1 missing"
+    ],
+    "version_blocked_by": [
+      "ubuntu: tier1 missing"
+    ]
+  },
+  "gfx": {
+    "requested": [
+      "gfx1010",
+      "gfx1011",
+      "gfx1012",
+      "gfx1030",
+      "gfx1031",
+      "gfx1032",
+      "gfx1033",
+      "gfx1034",
+      "gfx1035",
+      "gfx1036",
+      "gfx1100",
+      "gfx1101",
+      "gfx1102",
+      "gfx1103",
+      "gfx1150",
+      "gfx1151",
+      "gfx1152",
+      "gfx1153",
+      "gfx1200",
+      "gfx1201"
+    ],
+    "present_in_binary": [
+      "gfx1010",
+      "gfx1011",
+      "gfx1012",
+      "gfx1030",
+      "gfx1031",
+      "gfx1032",
+      "gfx1033",
+      "gfx1034",
+      "gfx1035",
+      "gfx1036",
+      "gfx1100",
+      "gfx1101",
+      "gfx1102",
+      "gfx1103",
+      "gfx1150",
+      "gfx1151",
+      "gfx1152",
+      "gfx1153",
+      "gfx1200",
+      "gfx1201"
+    ],
+    "missing_from_binary": [],
+    "hardware_validated": []
+  }
+}

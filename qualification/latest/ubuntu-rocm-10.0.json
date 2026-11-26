@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "kind": "qualification_record",
-  "generated_at": "2026-11-25T12:33:32Z",
+  "generated_at": "2026-11-26T15:01:11Z",
   "build": {
-    "build_id": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip@45391097191",
+    "build_id": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip@45611333176",
     "artifact": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip",
     "os": "ubuntu",
     "rocm_version": "10.0",
-    "sdcpp_tag": "master-1122-5519d71",
-    "upstream_sha": "3b12781fac1a22eda27ad0f08d0884ef816f24d7",
+    "sdcpp_tag": "master-1127-5519d71",
+    "upstream_sha": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
     "gfx_target": null,
     "hardware_validated": false,
-    "run_id": "45391097191",
+    "run_id": "45611333176",
     "run_attempt": "1"
   },
   "overall": "fail",
@@ -70,7 +70,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 13060,
+          "duration_ms": 21431,
           "error": null,
           "details": {
             "binary": "libggml-hip.so",
@@ -204,7 +204,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 1,
+          "duration_ms": 2,
           "error": null,
           "details": {
             "binaries_scanned": 25,
@@ -223,7 +223,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 1,
+          "duration_ms": 2,
           "error": null,
           "details": {
             "glibc_required": "2.38",
@@ -277,7 +277,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 89,
+          "duration_ms": 109,
           "error": null,
           "details": {
             "returncode": 0,
@@ -295,9 +295,9 @@
           "duration_ms": 0,
           "error": null,
           "details": {
-            "expected_upstream_sha": "3b12781fac1a22eda27ad0f08d0884ef816f24d7",
-            "binary_version": "master-1122-3b12781",
-            "binary_commit": "3b12781"
+            "expected_upstream_sha": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
+            "binary_version": "master-1127-79dc7ca",
+            "binary_commit": "79dc7ca"
           }
         },
         {
@@ -336,14 +336,14 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 3531,
+          "duration_ms": 3575,
           "error": null,
           "details": {
             "entries": 39,
             "missing": [],
-            "bytes": 290444408,
-            "sha256": "bf6939acf38c9c8179e883fbb065dd4dd09ae6c60885eb51dca09b9386a0c303",
-            "expected_sha256": "bf6939acf38c9c8179e883fbb065dd4dd09ae6c60885eb51dca09b9386a0c303"
+            "bytes": 290447418,
+            "sha256": "69599e3464951aaef527235a50dbdf67f05b387d35d6c12dcfa59153a1a2817e",
+            "expected_sha256": "69599e3464951aaef527235a50dbdf67f05b387d35d6c12dcfa59153a1a2817e"
           }
         }
       ]
