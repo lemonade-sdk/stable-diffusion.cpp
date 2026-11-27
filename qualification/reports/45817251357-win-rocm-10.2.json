@@ -1,0 +1,547 @@
+{
+  "schema_version": 1,
+  "kind": "qualification_record",
+  "generated_at": "2026-11-27T12:30:13Z",
+  "build": {
+    "build_id": "sd-master-5519d71-bin-win-rocm-10.2.0-x64.zip@45817251357",
+    "artifact": "sd-master-5519d71-bin-win-rocm-10.2.0-x64.zip",
+    "os": "win",
+    "rocm_version": "10.2",
+    "sdcpp_tag": "master-1133-5519d71",
+    "upstream_sha": "52491bd9f1fc15281791723bdff13baab7fd6819",
+    "gfx_target": "gfx1151",
+    "hardware_validated": true,
+    "run_id": "45817251357",
+    "run_attempt": "1",
+    "runner_env": {
+      "platform": "Windows-11-10.0.26200-SP0",
+      "machine_name": "sjlab-stx-halo-04",
+      "python": "3.12.10",
+      "foreign_rocm_env_removed": {},
+      "gpu_drivers": [
+        {
+          "DriverDesc": "AMD Radeon(TM) 8060S Graphics",
+          "ProviderName": "Advanced Micro Devices, Inc.",
+          "DriverVersion": "32.0.31041.1004",
+          "DriverDate": "8-17-2026",
+          "RadeonSoftwareVersion": "26.8.1"
+        }
+      ],
+      "driver_hip_runtime_in_system32": [
+        "amdhip64.dll",
+        "amdhip64_6.dll",
+        "amdhip64_7.dll"
+      ]
+    }
+  },
+  "overall": "pass",
+  "promoted": true,
+  "counts": {
+    "pass": 15,
+    "fail": 0,
+    "warn": 0,
+    "skip": 3,
+    "total": 18
+  },
+  "tiers": {
+    "tier0": {
+      "status": "pass",
+      "tier_name": "Static artifact verification",
+      "counts": {
+        "pass": 9,
+        "fail": 0,
+        "warn": 0,
+        "skip": 3,
+        "total": 12
+      },
+      "tests": [
+        {
+          "id": "T0.1",
+          "name": "archive contents",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "entries": 8,
+            "missing": [],
+            "test_binaries_shipped": 0,
+            "test_binaries": []
+          }
+        },
+        {
+          "id": "T0.2",
+          "name": "HIP code present",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "binary": "stable-diffusion.dll",
+            "exists": true,
+            "bytes": 1183444480
+          }
+        },
+        {
+          "id": "T0.3",
+          "name": "gfx target audit",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 17625,
+          "error": null,
+          "details": {
+            "binary": "stable-diffusion.dll",
+            "bytes_scanned": 1183444480,
+            "bundle_magic_count": 151,
+            "expected_count": 20,
+            "present_count": 20,
+            "expected": [
+              "gfx1010",
+              "gfx1011",
+              "gfx1012",
+              "gfx1030",
+              "gfx1031",
+              "gfx1032",
+              "gfx1033",
+              "gfx1034",
+              "gfx1035",
+              "gfx1036",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1103",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1153",
+              "gfx1200",
+              "gfx1201"
+            ],
+            "present": [
+              "gfx1010",
+              "gfx1011",
+              "gfx1012",
+              "gfx1030",
+              "gfx1031",
+              "gfx1032",
+              "gfx1033",
+              "gfx1034",
+              "gfx1035",
+              "gfx1036",
+              "gfx1100",
+              "gfx1101",
+              "gfx1102",
+              "gfx1103",
+              "gfx1150",
+              "gfx1151",
+              "gfx1152",
+              "gfx1153",
+              "gfx1200",
+              "gfx1201"
+            ],
+            "missing": [],
+            "extra": [],
+            "entries_per_target": {
+              "gfx1010": 151,
+              "gfx1011": 151,
+              "gfx1012": 151,
+              "gfx1030": 151,
+              "gfx1031": 151,
+              "gfx1032": 151,
+              "gfx1033": 151,
+              "gfx1034": 151,
+              "gfx1035": 151,
+              "gfx1036": 151,
+              "gfx1100": 151,
+              "gfx1101": 151,
+              "gfx1102": 151,
+              "gfx1103": 151,
+              "gfx1150": 151,
+              "gfx1151": 151,
+              "gfx1152": 151,
+              "gfx1153": 151,
+              "gfx1200": 151,
+              "gfx1201": 151
+            },
+            "entry_count_uniform": true,
+            "other_binaries": {}
+          }
+        },
+        {
+          "id": "T0.4",
+          "name": "CPU backend variants",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "the Windows ROCm build links the CPU backend into stable-diffusion.dll",
+          "details": {}
+        },
+        {
+          "id": "T0.5",
+          "name": "runtime dependency survey",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 639,
+          "error": null,
+          "details": {
+            "binaries_scanned": 6,
+            "rocm_runtime_required": [
+              "amdhip64_7.dll",
+              "hipblas.dll",
+              "libhipblaslt.dll",
+              "rocm_kpack.dll"
+            ],
+            "unresolved": {}
+          }
+        },
+        {
+          "id": "T0.6",
+          "name": "Linux version support",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "Linux-only check",
+          "details": {}
+        },
+        {
+          "id": "T0.7",
+          "name": "library search path",
+          "tier": "tier0",
+          "status": "skip",
+          "gating": true,
+          "duration_ms": 0,
+          "error": "Linux-only check",
+          "details": {}
+        },
+        {
+          "id": "T0.8",
+          "name": "sd-server flag surface",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 1235,
+          "error": null,
+          "details": {
+            "returncode": 0,
+            "help_bytes": 22146,
+            "flags_checked": 7,
+            "flags_missing": []
+          }
+        },
+        {
+          "id": "T0.9",
+          "name": "upstream provenance",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "expected_upstream_sha": "52491bd9f1fc15281791723bdff13baab7fd6819",
+            "binary_version": "master-1133-52491bd",
+            "binary_commit": "52491bd"
+          }
+        },
+        {
+          "id": "T0.10",
+          "name": "ROCm dependency resolution",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 686,
+          "error": null,
+          "details": {
+            "rocm_dirs_searched": 6,
+            "files_available": 135,
+            "rocm_libraries_required": [
+              "amdhip64_7.dll",
+              "hipblas.dll",
+              "libhipblaslt.dll",
+              "rocm_kpack.dll"
+            ],
+            "unresolved": {}
+          }
+        },
+        {
+          "id": "T0.11",
+          "name": "bundled HIP runtime matches ROCm",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 360,
+          "error": null,
+          "details": {
+            "files": {
+              "amd_comgr.dll": {
+                "archive": "cddea6ccb87b6f2b03e8b718459529936d4c6a85284104a3d56eb3c6a3922189",
+                "rocm": "cddea6ccb87b6f2b03e8b718459529936d4c6a85284104a3d56eb3c6a3922189"
+              },
+              "amdhip64_7.dll": {
+                "archive": "1742ada70fb013062b062f03d7720e7bddcf42c548388d1bb07c32f9ad5f7b16",
+                "rocm": "1742ada70fb013062b062f03d7720e7bddcf42c548388d1bb07c32f9ad5f7b16"
+              },
+              "rocm_kpack.dll": {
+                "archive": "7a490af934744f747fa43dc42e31e24def5f2c847d071be0993d53af3c982359",
+                "rocm": "7a490af934744f747fa43dc42e31e24def5f2c847d071be0993d53af3c982359"
+              }
+            },
+            "problems": []
+          }
+        },
+        {
+          "id": "T0.12",
+          "name": "final archive integrity",
+          "tier": "tier0",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 3528,
+          "error": null,
+          "details": {
+            "entries": 8,
+            "missing": [],
+            "bytes": 284985834,
+            "sha256": "005cf64f29d993626a73de3c94e83082ef6c1a15f23bedcd6a464fce66555cfe",
+            "expected_sha256": "005cf64f29d993626a73de3c94e83082ef6c1a15f23bedcd6a464fce66555cfe"
+          }
+        }
+      ]
+    },
+    "tier1": {
+      "status": "pass",
+      "tier_name": "GPU functional inference",
+      "counts": {
+        "pass": 6,
+        "fail": 0,
+        "warn": 0,
+        "skip": 0,
+        "total": 6
+      },
+      "tests": [
+        {
+          "id": "T1.1",
+          "name": "server boot",
+          "tier": "tier1",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": null,
+          "error": null,
+          "details": {
+            "port": 8233,
+            "args": [
+              "-v"
+            ],
+            "model": "sd_turbo-f16-q8_0.gguf"
+          }
+        },
+        {
+          "id": "T1.2",
+          "name": "GPU really did the work",
+          "tier": "tier1",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 15,
+          "error": null,
+          "details": {
+            "devices": [
+              {
+                "index": 0,
+                "name": "AMD Radeon(TM) 8060S Graphics",
+                "gfx": "gfx1151"
+              }
+            ],
+            "params_buffers": [
+              {
+                "mb": 345.99,
+                "memory": "VRAM",
+                "device": "ROCm0"
+              },
+              {
+                "mb": 1411.07,
+                "memory": "VRAM",
+                "device": "ROCm0"
+              },
+              {
+                "mb": 94.47,
+                "memory": "VRAM",
+                "device": "ROCm0"
+              }
+            ],
+            "compute_buffers": [
+              {
+                "graph": "clip",
+                "mb": 1.89,
+                "device": "ROCm0"
+              },
+              {
+                "graph": "unet",
+                "mb": 1.39,
+                "device": "ROCm0"
+              },
+              {
+                "graph": "unet",
+                "mb": 87.86,
+                "device": "ROCm0"
+              },
+              {
+                "graph": "vae",
+                "mb": 704.0,
+                "device": "ROCm0"
+              }
+            ],
+            "placement": {
+              "unet": "GPU",
+              "text_encoder": "GPU",
+              "vae": "GPU"
+            },
+            "params_buffer_count": 3,
+            "compute_buffer_count": 4
+          }
+        },
+        {
+          "id": "T1.3",
+          "name": "GPU target detected",
+          "tier": "tier1",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 0,
+          "error": null,
+          "details": {
+            "expected": "gfx1151",
+            "detected": [
+              "gfx1151"
+            ],
+            "device_names": [
+              "AMD Radeon(TM) 8060S Graphics"
+            ]
+          }
+        },
+        {
+          "id": "T1.4",
+          "name": "image well-formed",
+          "tier": "tier1",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 125,
+          "error": null,
+          "details": {
+            "bytes": 576379,
+            "width": 512,
+            "height": 512,
+            "channels": 3,
+            "pixel_mean": 89.72,
+            "pixel_stddev": 45.61,
+            "distinct_values": 252,
+            "request_seconds": 3.12,
+            "sha256": "e504bdca3a1c23413654c0e4f02fdb71d032adc53a6f2b5cdd9016c007b9c8d5"
+          }
+        },
+        {
+          "id": "T1.5",
+          "name": "deterministic output",
+          "tier": "tier1",
+          "status": "pass",
+          "gating": false,
+          "duration_ms": 1109,
+          "error": null,
+          "details": {
+            "first_sha256": "e504bdca3a1c23413654c0e4f02fdb71d032adc53a6f2b5cdd9016c007b9c8d5",
+            "second_sha256": "e504bdca3a1c23413654c0e4f02fdb71d032adc53a6f2b5cdd9016c007b9c8d5",
+            "second_request_seconds": 1.09
+          }
+        },
+        {
+          "id": "T1.6",
+          "name": "ROCm loaded from the expected places",
+          "tier": "tier1",
+          "status": "pass",
+          "gating": true,
+          "duration_ms": 15,
+          "error": null,
+          "details": {
+            "archive_dir": "C:\\actions-runner\\_work\\_temp\\tier1-rask0pzy\\x",
+            "bundled_in_archive": [
+              "amd_comgr.dll",
+              "amdhip64_7.dll",
+              "rocm_kpack.dll"
+            ],
+            "modules_loaded": 56,
+            "rocm_libraries_loaded": [
+              "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.2.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\hipblas.dll",
+              "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.2.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\libhipblaslt.dll",
+              "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.2.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\libtensilelite-host.dll",
+              "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.2.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\origami.dll",
+              "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.2.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\rocblas.dll",
+              "C:\\actions-runner\\_work\\_temp\\rocm-qual\\rocm-10.2.0-gfx1151\\Lib\\site-packages\\_rocm_sdk_libraries\\bin\\rocsolver.dll",
+              "C:\\actions-runner\\_work\\_temp\\tier1-rask0pzy\\x\\amd_comgr.dll",
+              "C:\\actions-runner\\_work\\_temp\\tier1-rask0pzy\\x\\amdhip64_7.dll",
+              "C:\\actions-runner\\_work\\_temp\\tier1-rask0pzy\\x\\rocm_kpack.dll"
+            ],
+            "loaded_from_unexpected_place": []
+          }
+        }
+      ]
+    }
+  },
+  "promotion": {
+    "blocked_by": [],
+    "version_blocked_by": [
+      "ubuntu: tier1 missing"
+    ]
+  },
+  "gfx": {
+    "requested": [
+      "gfx1010",
+      "gfx1011",
+      "gfx1012",
+      "gfx1030",
+      "gfx1031",
+      "gfx1032",
+      "gfx1033",
+      "gfx1034",
+      "gfx1035",
+      "gfx1036",
+      "gfx1100",
+      "gfx1101",
+      "gfx1102",
+      "gfx1103",
+      "gfx1150",
+      "gfx1151",
+      "gfx1152",
+      "gfx1153",
+      "gfx1200",
+      "gfx1201"
+    ],
+    "present_in_binary": [
+      "gfx1010",
+      "gfx1011",
+      "gfx1012",
+      "gfx1030",
+      "gfx1031",
+      "gfx1032",
+      "gfx1033",
+      "gfx1034",
+      "gfx1035",
+      "gfx1036",
+      "gfx1100",
+      "gfx1101",
+      "gfx1102",
+      "gfx1103",
+      "gfx1150",
+      "gfx1151",
+      "gfx1152",
+      "gfx1153",
+      "gfx1200",
+      "gfx1201"
+    ],
+    "missing_from_binary": [],
+    "hardware_validated": [
+      "gfx1151"
+    ]
+  }
+}

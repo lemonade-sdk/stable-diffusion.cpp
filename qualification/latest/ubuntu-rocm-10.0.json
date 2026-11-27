@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "kind": "qualification_record",
-  "generated_at": "2026-11-26T15:01:11Z",
+  "generated_at": "2026-11-27T12:30:13Z",
   "build": {
-    "build_id": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip@45611333176",
+    "build_id": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip@45817251357",
     "artifact": "sd-master-5519d71-bin-Linux-Ubuntu-24.04-x86_64-rocm-10.0.0.zip",
     "os": "ubuntu",
     "rocm_version": "10.0",
-    "sdcpp_tag": "master-1127-5519d71",
-    "upstream_sha": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
+    "sdcpp_tag": "master-1133-5519d71",
+    "upstream_sha": "52491bd9f1fc15281791723bdff13baab7fd6819",
     "gfx_target": null,
     "hardware_validated": false,
-    "run_id": "45611333176",
+    "run_id": "45817251357",
     "run_attempt": "1"
   },
   "overall": "fail",
@@ -70,7 +70,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 21431,
+          "duration_ms": 23450,
           "error": null,
           "details": {
             "binary": "libggml-hip.so",
@@ -223,7 +223,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 2,
+          "duration_ms": 3,
           "error": null,
           "details": {
             "glibc_required": "2.38",
@@ -265,7 +265,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 1,
+          "duration_ms": 2,
           "error": null,
           "details": {
             "leaked": {}
@@ -277,11 +277,11 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 109,
+          "duration_ms": 121,
           "error": null,
           "details": {
             "returncode": 0,
-            "help_bytes": 21671,
+            "help_bytes": 22165,
             "flags_checked": 7,
             "flags_missing": []
           }
@@ -295,9 +295,9 @@
           "duration_ms": 0,
           "error": null,
           "details": {
-            "expected_upstream_sha": "79dc7ca9074d79419a46380cdb95a4524db9b74c",
-            "binary_version": "master-1127-79dc7ca",
-            "binary_commit": "79dc7ca"
+            "expected_upstream_sha": "52491bd9f1fc15281791723bdff13baab7fd6819",
+            "binary_version": "master-1133-52491bd",
+            "binary_commit": "52491bd"
           }
         },
         {
@@ -306,7 +306,7 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 2,
+          "duration_ms": 3,
           "error": null,
           "details": {
             "rocm_dirs_searched": 6,
@@ -336,14 +336,14 @@
           "tier": "tier0",
           "status": "pass",
           "gating": true,
-          "duration_ms": 3575,
+          "duration_ms": 3520,
           "error": null,
           "details": {
             "entries": 39,
             "missing": [],
-            "bytes": 290447418,
-            "sha256": "69599e3464951aaef527235a50dbdf67f05b387d35d6c12dcfa59153a1a2817e",
-            "expected_sha256": "69599e3464951aaef527235a50dbdf67f05b387d35d6c12dcfa59153a1a2817e"
+            "bytes": 290592237,
+            "sha256": "1dbf5ceefe5d9b1b72d0bd5800c44a8846c033b08c78a3950605e46bac07cd5b",
+            "expected_sha256": "1dbf5ceefe5d9b1b72d0bd5800c44a8846c033b08c78a3950605e46bac07cd5b"
           }
         }
       ]
