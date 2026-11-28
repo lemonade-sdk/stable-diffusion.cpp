@@ -14,35 +14,47 @@ namespace SD_CUDA_NAMESPACE {
     }
 
     template <int D, bool interleaved, typename T, bool affine = true, int HiddenDim = 0>
-    static __global__ __launch_bounds__(HiddenDim ? HiddenDim / 4 : 128) void rms_norm_mul_rope_apply_fused(
-        const float* x,
-        const float* weight,
-        const float* pe,
-        T* dst,
-        int64_t heads,
-        int64_t tokens,
-        int64_t rows,
-        int64_t nb1,
-        int64_t nb2,
-        int64_t nb3,
-        int rot_half,
-        float eps,
-        float output_scale) {
-        const int lane           = threadIdx.x;
-        const int64_t head_count = HiddenDim > 0 ? HiddenDim / D : heads;
-        int64_t first            = int64_t(blockIdx.x) * blockDim.y + threadIdx.y;
-        int64_t end              = first + 1;
-        float scale              = 1.0f;
+    static __global__ __launch_bounds__(HiddenDim > 4096 ? 256 : HiddenDim ? HiddenDim / 4
+                                                                           : 128) void rms_norm_mul_rope_apply_fused(const float* x,
+                                                                                                                     const float* weight,
+                                                                                                                     const float* pe,
+                                                                                                                     T* dst,
+                                                                                                                     int64_t heads,
+                                                                                                                     int64_t tokens,
+                                                                                                                     int64_t rows,
+                                                                                                                     int64_t nb1,
+                                                                                                                     int64_t nb2,
+                                                                                                                     int64_t nb3,
+                                                                                                                     int rot_half,
+                                                                                                                     float eps,
+                                                                                                                     float output_scale) {
+        const int lane                  = threadIdx.x;
+        const int64_t head_count        = HiddenDim > 0 ? HiddenDim / D : heads;
+        constexpr bool shared_positions = HiddenDim == 5120;
+        constexpr int physical_warps    = shared_positions ? 8 : HiddenDim / 128;
+        int64_t first                   = int64_t(blockIdx.x) * blockDim.y + threadIdx.y;
+        int64_t end                     = first + 1;
+        float scale                     = 1.0f;
         if constexpr (HiddenDim > 0) {
-            constexpr int threads = HiddenDim / 4;
+            constexpr int threads = HiddenDim > 4096 ? 1024 : HiddenDim / 4;
             constexpr int warps   = threads / 32;
             __shared__ float warp_sums[warps];
-            const int tid  = threadIdx.y * 32 + lane;
-            const float4 v = reinterpret_cast<const float4*>(x)[int64_t(blockIdx.x) * threads + tid];
-            // Match the vectorized whole-row RMSNorm reduction before splitting the heads.
-            const float sum = sd_warp_sum(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w);
-            if (lane == 0) {
-                warp_sums[threadIdx.y] = sum;
+            const auto* row = reinterpret_cast<const float4*>(x) + int64_t(blockIdx.x) * (HiddenDim / 4);
+            // Match the native vectorized RMSNorm reduction, even when several virtual warps share one physical warp.
+            for (int warp = threadIdx.y; warp < warps; warp += physical_warps) {
+                const int tid  = warp * 32 + lane;
+                const float4 v = row[tid];
+                float sum      = v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
+                if constexpr (HiddenDim > 4096) {
+                    if (tid + threads < HiddenDim / 4) {
+                        const float4 tail = row[tid + threads];
+                        sum += tail.x * tail.x + tail.y * tail.y + tail.z * tail.z + tail.w * tail.w;
+                    }
+                }
+                sum = sd_warp_sum(sum);
+                if (lane == 0) {
+                    warp_sums[warp] = sum;
+                }
             }
             __syncthreads();
             scale = rsqrtf(sd_warp_sum(lane < warps ? warp_sums[lane] : 0.f) / HiddenDim + eps);
@@ -51,14 +63,16 @@ namespace SD_CUDA_NAMESPACE {
         } else if (first >= rows) {
             return;
         }
-        for (int64_t row = first; row < end; row += HiddenDim > 0 ? HiddenDim / 128 : 1) {
+        for (int64_t row = first; row < end; row += HiddenDim > 0 ? physical_warps : 1) {
             const int64_t head      = row % head_count;
             const int64_t token     = HiddenDim > 0 ? int64_t(blockIdx.x) : (row / heads) % tokens;
             const int64_t batch     = HiddenDim > 0 ? 0 : row / (heads * tokens);
             const float* x_row      = x + head * nb1 + token * nb2 + batch * nb3;
             const float* weight_row = HiddenDim > 0 ? weight + head * D : weight;
-            const int64_t position  = HiddenDim > 0 ? row : token;
-            const int64_t out_row   = HiddenDim > 0 && std::is_same<T, float>::value ? row : (batch * heads + head) * tokens + token;
+            const int64_t position  = HiddenDim > 0 && !shared_positions ? row : token;
+            const int64_t out_row   = HiddenDim > 0 && !shared_positions && std::is_same<T, float>::value
+                                          ? row
+                                          : (batch * heads + head) * tokens + token;
             T* out                  = dst + out_row * D;
             float v[D / 32], sums[8] = {};
 #pragma unroll
@@ -233,14 +247,17 @@ namespace SD_CUDA_NAMESPACE {
             reshape->src[0] != mul || rope->src[0] != reshape || !rope_supports(nullptr, rope, nullptr)) {
             return false;
         }
-        const auto* x      = norm->src[0];
-        const auto* weight = mul->src[1];
-        const auto* pe     = rope->src[1];
+        const auto* x               = norm->src[0];
+        const auto* weight          = mul->src[1];
+        const auto* pe              = rope->src[1];
+        const bool shared_positions = x && x->ne[0] == 5120 && reshape->ne[0] == 128 &&
+                                      reshape->ne[1] == 40 && reshape->ne[2] == ggml_nrows(x);
         return x && weight && weight != norm && x->type == GGML_TYPE_F32 && norm->type == GGML_TYPE_F32 &&
                weight->type == GGML_TYPE_F32 && ggml_nelements(weight) == x->ne[0] && weight->ne[0] == x->ne[0] &&
-               (x->ne[0] == 2048 || x->ne[0] == 4096) && ggml_nrows(x) <= INT_MAX &&
+               (x->ne[0] == 2048 || x->ne[0] == 4096 || shared_positions) &&
+               ggml_nrows(x) <= INT_MAX &&
                ggml_are_same_shape(x, norm) && ggml_are_same_shape(x, mul) &&
-               reshape->ne[1] == 1 && reshape->ne[3] == 1 &&
+               (reshape->ne[1] == 1 || shared_positions) && reshape->ne[3] == 1 &&
                (reshape->ne[0] == 64 || reshape->ne[0] == 128) &&
                pe->ne[2] == reshape->ne[0] / 2 && ggml_is_contiguous(pe) &&
                ggml_is_contiguous(reshape) && ggml_is_contiguous(x) && ggml_is_contiguous(weight) &&
@@ -258,7 +275,8 @@ namespace SD_CUDA_NAMESPACE {
         auto kernel         = rope_interleaved(nodes[3])
                                   ? rms_norm_mul_rope_apply_fused<HeadDim, true, T, true, HiddenDim>
                                   : rms_norm_mul_rope_apply_fused<HeadDim, false, T, true, HiddenDim>;
-        kernel<<<static_cast<unsigned>(tokens), dim3(32, HiddenDim / 128), 0, stream>>>(
+        constexpr int warps = HiddenDim > 4096 ? 8 : HiddenDim / 128;
+        kernel<<<static_cast<unsigned>(tokens), dim3(32, warps), 0, stream>>>(
             static_cast<const float*>(x->data), static_cast<const float*>(weight->data), static_cast<const float*>(pe->data), output,
             heads, tokens, tokens * heads, HeadDim, HiddenDim, 0, HeadDim / 2, param_f32(nodes[0], 0), scale);
     }
@@ -267,7 +285,9 @@ namespace SD_CUDA_NAMESPACE {
     static CUDAError hidden_rope_launch(CUDAStream stream, ggml_tensor* const* nodes, T* output, float scale) {
         const auto dim      = nodes[0]->ne[0];
         const auto head_dim = nodes[3]->ne[0];
-        if (dim == 4096 && head_dim == 128) {
+        if (dim == 5120) {
+            hidden_rope_launch<5120, 128>(stream, nodes, output, scale);
+        } else if (dim == 4096 && head_dim == 128) {
             hidden_rope_launch<4096, 128>(stream, nodes, output, scale);
         } else if (dim == 4096) {
             hidden_rope_launch<4096, 64>(stream, nodes, output, scale);
@@ -293,10 +313,13 @@ namespace SD_CUDA_NAMESPACE {
     bool hidden_rope_head_major(const ggml_tensor* view, const ggml_tensor* norm, const ggml_tensor* rope) {
         const auto head_dim = rope->ne[0];
         const auto width    = norm->ne[0];
-        return view->ne[0] == head_dim && view->ne[1] == ggml_nrows(norm) &&
-               view->ne[2] == width / head_dim && view->ne[3] == 1 &&
-               view->nb[0] == sizeof(float) && view->nb[1] == width * sizeof(float) &&
-               view->nb[2] == head_dim * sizeof(float);
+        if (view->ne[0] != head_dim || view->ne[1] != ggml_nrows(norm) ||
+            view->ne[2] != width / head_dim || view->ne[3] != 1) {
+            return false;
+        }
+        return rope->src[0]->ne[1] > 1 ? ggml_is_contiguous(view)
+                                       : view->nb[0] == sizeof(float) && view->nb[1] == width * sizeof(float) &&
+                                             view->nb[2] == head_dim * sizeof(float);
     }
 
     static int hidden_rope_cast_count(ggml_cgraph* graph, int first) {

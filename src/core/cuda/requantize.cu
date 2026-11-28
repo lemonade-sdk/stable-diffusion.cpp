@@ -168,7 +168,7 @@ namespace SD_CUDA_NAMESPACE {
                     values[j]        = h256_signed(blocks[0].decode(source) * (1.0f / 16.0f), i);
                 } else {
                     const int i = j * lanes + lane;
-                    values[j] = blocks[i / block_size].decode(i % block_size) * (1.0f / 16.0f);
+                    values[j]   = blocks[i / block_size].decode(i % block_size) * (1.0f / 16.0f);
                 }
             }
             if constexpr (cuda_kind == GGML_EXT_GPU_CUDA && block_size == group_size) {

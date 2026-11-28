@@ -152,11 +152,11 @@ On Vulkan, CPU-offloaded weights use pageable system RAM, leaving the driver's h
 
 When a graph has cut markers and its missing weights plus incremental compute workspace exceed the available device headroom, it runs its fixed segment list in order. An existing monolithic workspace can be reused without a new allocation. An explicit `--max-vram` budget includes resident managed weights, compute and cache buffers registered by runners sharing the device, and ggml's idle buffer pool. The current segment's weights are pinned during compute, and the next parameter-bearing segment is prefetched when the device supports asynchronous transfer. No opt-in streaming flag is required.
 
-When choosing between monolithic and segmented execution, the runner requires
-an additional 128 MiB of headroom in both available device memory and any explicit
-managed budget. This planning headroom absorbs small allocation estimate changes;
-subsequent capacity checks can consume it while still preserving the 512 MiB device
-scratch reserve and respecting the managed budget.
+When planning a new monolithic workspace allocation, the runner requires an
+additional 128 MiB in both available device memory and any explicit managed
+budget. New device allocations also reserve 512 MiB for backend scratch
+buffers, or 1 GiB on Windows CUDA. A graph that reuses its resident weights and
+workspace still checks the managed budget.
 
 - `--max-vram <GiB>` optionally lowers the live-memory limit. A positive value is a managed per-device budget, `0` uses the device's current free memory without an explicit budget, and a negative value snapshots free memory at startup while reserving that many GiB (`--max-vram -1` reserves about 1 GiB). Driver contexts and unrelated external allocations remain outside the managed budget.
 - `--disable-prefetch` disables asynchronous next-segment prefetch while retaining synchronous loading, eviction, and segmented execution.

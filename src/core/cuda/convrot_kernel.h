@@ -218,7 +218,13 @@ namespace SD_CUDA_NAMESPACE {
                     const float inv_std  = rsqrtf(variance + eps);
                     for (int64_t i = tid; i < k; i += 1024) {
                         const float normalized = __fmul_rn(__fsub_rn(src_row[i], mean), inv_std);
-                        values[i]              = __fmul_rn(__fmul_rn(normalized, modulation[i]), 1.0f / 16.0f);
+                        float value            = __fmul_rn(normalized, modulation[i]);
+                        if constexpr (modulate) {
+                            value = __fadd_rn(normalized, value);
+                            if (rms_shift)
+                                value = __fadd_rn(value, rms_shift[i]);
+                        }
+                        values[i] = __fmul_rn(value, rotation_scale);
                     }
                 } else {
                     for (int64_t i = tid; i < k; i += blockDim.x) {

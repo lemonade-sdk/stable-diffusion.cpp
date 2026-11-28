@@ -555,7 +555,9 @@ namespace sd {
                 constexpr size_t planning_headroom = 128ULL * 1024ULL * 1024ULL;
                 auto requests                      = memory_requests(full_measurement.buffers, session_.cache_.pending_bytes(graph));
                 for (auto& request : requests) {
-                    request.pending_allocation_bytes = add_bytes(request.pending_allocation_bytes, planning_headroom);
+                    if (request.pending_allocation_bytes != 0) {
+                        request.pending_allocation_bytes = add_bytes(request.pending_allocation_bytes, planning_headroom);
+                    }
                 }
                 segmented = !fits(requests, params, DeviceMemoryCheck::Reclaimable);
             }

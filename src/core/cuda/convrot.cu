@@ -27,6 +27,7 @@ namespace SD_CUDA_NAMESPACE {
         }
         enum Kind { SCALE,
                     NORM,
+                    NORM_MOD,
                     MOD,
                     RMS_MOD,
                     RMS_MOD_VEC,
@@ -85,6 +86,14 @@ namespace SD_CUDA_NAMESPACE {
                 op.eps        = param_f32(first, 0);
                 if (op.k < 1024 || !vector(op.modulation, op.k))
                     return false;
+            } else if (count == 3 && first->op == GGML_OP_NORM && value == nodes[1] &&
+                       sd_ggml_modulate_describe(value) && value->src[0] == first) {
+                op.kind       = NORM_MOD;
+                op.modulation = value->src[1];
+                op.shift      = value->src[2];
+                op.eps        = param_f32(first, 0);
+                if (op.k < 1024 || !vector(op.modulation, op.k) || (op.shift && !vector(op.shift, op.k)))
+                    return false;
             } else if (count == 2 && sd_ggml_modulate_describe(first) && value == first) {
                 op.kind       = MOD;
                 op.modulation = first->src[1];
@@ -134,7 +143,7 @@ namespace SD_CUDA_NAMESPACE {
                     return false;
             } else
                 return false;
-            if (op.group == 1 && (op.kind == SCALE || op.kind == NORM))
+            if (op.group == 1 && (op.kind == SCALE || op.kind == NORM || op.kind == NORM_MOD))
                 return false;
             for (int i = 0; i < count - 1; ++i) {
                 if (!f32(nodes[i]) || !ggml_are_same_shape(nodes[i], value))
@@ -146,8 +155,8 @@ namespace SD_CUDA_NAMESPACE {
             return true;
         }
         static bool supported(const Operation& op, const ggml_ext_gpu_device_info& device) {
-            const size_t extra = op.kind == NORM ? 384 : op.kind == RMS_MOD || op.kind == RMS_MOD_VEC ? 256
-                                                                                                      : 128;
+            const size_t extra = op.kind == NORM || op.kind == NORM_MOD ? 384 : op.kind == RMS_MOD || op.kind == RMS_MOD_VEC ? 256
+                                                                                                                             : 128;
             return device.device >= 0 && size_t(op.k) * sizeof(float) + extra <= device.shared_memory;
         }
         static int match(ggml_backend_dev_t device, const ggml_cgraph* graph, int first, void*) {
@@ -188,7 +197,8 @@ namespace SD_CUDA_NAMESPACE {
                         chain[2] = value;
                         chain[3] = quant;
                         count    = 4;
-                    } else if (weight->op == GGML_OP_RMS_NORM && vector_rms_input(weight->src[0], value->ne[0])) {
+                    } else if (weight->op == GGML_OP_NORM ||
+                               (weight->op == GGML_OP_RMS_NORM && vector_rms_input(weight->src[0], value->ne[0]))) {
                         chain[0] = weight;
                         chain[1] = value;
                         chain[2] = quant;
@@ -259,7 +269,7 @@ namespace SD_CUDA_NAMESPACE {
         }
         template <bool Rotate, bool Swiglu, bool Normalize, bool Scaled, bool Sigmoid, bool RMS, bool Modulate, bool Situ, bool Gelu, bool RMSVec>
         static CUDAError launch_quantize(Plan& p, const Operation& op, int8_t* output, CUDAStream stream) {
-            constexpr bool warp = Scaled || RMS || Modulate || Gelu;
+            constexpr bool warp = Scaled || RMS || (Modulate && !Normalize) || Gelu;
             constexpr int extra = Normalize ? 384 : RMS ? 256
                                                         : 128;
             if (!p.configured) {
@@ -283,7 +293,7 @@ namespace SD_CUDA_NAMESPACE {
         }
         template <bool Swiglu = false, bool Normalize = false, bool Scaled = false, bool Sigmoid = false, bool RMS = false, bool Modulate = false, bool Situ = false, bool Gelu = false, bool RMSVec = false>
         static CUDAError launch(Plan& p, const Operation& op, int8_t* output, CUDAStream stream) {
-            if constexpr (Swiglu || RMS || Modulate || Gelu) {
+            if constexpr (Swiglu || RMS || (Modulate && !Normalize) || Gelu) {
                 if (op.group == 1)
                     return launch_quantize<false, Swiglu, Normalize, Scaled, Sigmoid, RMS, Modulate, Situ, Gelu, RMSVec>(p, op, output, stream);
             }
@@ -311,6 +321,9 @@ namespace SD_CUDA_NAMESPACE {
                     break;
                 case NORM:
                     error = launch<false, true>(plan, op, output, stream);
+                    break;
+                case NORM_MOD:
+                    error = launch<false, true, false, false, false, true>(plan, op, output, stream);
                     break;
                 case RMS_MOD:
                     error = launch<false, false, false, false, true>(plan, op, output, stream);

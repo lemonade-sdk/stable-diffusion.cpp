@@ -283,18 +283,16 @@ namespace WAN {
 
 namespace WAN {
 
-    static ggml_tensor* modulate_add(ggml_context* ctx, ggml_tensor* x, ggml_tensor* e) {
+    static ggml_tensor* modulate_time(GGMLRunnerContext* ctx, ggml_tensor* x, ggml_tensor* shift, ggml_tensor* scale) {
         // x: [N, n_token, dim]
-        // e: [N, 1, dim] or [N, T, 1, dim]
-        if (ggml_n_dims(e) == 3) {
-            int64_t T = e->ne[2];
-            x         = ggml_reshape_4d(ctx, x, x->ne[0], x->ne[1] / T, T, x->ne[2]);  // [N, T, n_token/T, dim]
-            x         = ggml_add(ctx, x, e);
-            x         = ggml_reshape_3d(ctx, x, x->ne[0], x->ne[1] * x->ne[2], x->ne[3]);  // [N, n_token, dim]
-        } else {
-            x = ggml_add(ctx, x, e);
+        // shift and scale: [N, 1, dim] or [N, T, 1, dim]
+        if (ggml_n_dims(scale) == 3) {
+            int64_t T = scale->ne[2];
+            x         = ggml_reshape_4d(ctx->ggml_ctx, x, x->ne[0], x->ne[1] / T, T, x->ne[2]);
+            x         = ggml_ext_modulate(ctx, x, shift, scale);
+            return ggml_reshape_3d(ctx->ggml_ctx, x, x->ne[0], x->ne[1] * x->ne[2], x->ne[3]);
         }
-        return x;
+        return ggml_ext_modulate(ctx, x, shift, scale);
     }
 
     static ggml_tensor* modulate_mul(ggml_context* ctx, ggml_tensor* x, ggml_tensor* e) {
@@ -373,9 +371,7 @@ namespace WAN {
             auto ffn_2      = std::dynamic_pointer_cast<Linear>(blocks["ffn.2"]);
 
             // self-attention
-            auto y = norm1->forward(ctx, x);
-            y      = ggml_add(ctx->ggml_ctx, y, modulate_mul(ctx->ggml_ctx, y, es[1]));
-            y      = modulate_add(ctx->ggml_ctx, y, es[0]);
+            auto y = modulate_time(ctx, norm1->forward(ctx, x), es[0], es[1]);
             y      = self_attn->forward(ctx, y, pe);
 
             x = ggml_add(ctx->ggml_ctx, x, modulate_mul(ctx->ggml_ctx, y, es[2]));
@@ -386,12 +382,11 @@ namespace WAN {
                          cross_attn->forward(ctx, norm3->forward(ctx, x), context, context_img_len));
 
             // ffn
-            y = norm2->forward(ctx, x);
-            y = ggml_add(ctx->ggml_ctx, y, modulate_mul(ctx->ggml_ctx, y, es[4]));
-            y = modulate_add(ctx->ggml_ctx, y, es[3]);
+            y = modulate_time(ctx, norm2->forward(ctx, x), es[3], es[4]);
 
             y = ffn_0->forward(ctx, y);
-            y = ggml_ext_gelu(ctx, y, true);
+            // Keep GELU out-of-place so it can fuse with ConvRot quantization.
+            y = ggml_ext_gelu(ctx, y);
             y = ffn_2->forward(ctx, y);
 
             x = ggml_add(ctx->ggml_ctx, x, modulate_mul(ctx->ggml_ctx, y, es[5]));
@@ -489,9 +484,7 @@ namespace WAN {
             auto norm = std::dynamic_pointer_cast<LayerNorm>(blocks["norm"]);
             auto head = std::dynamic_pointer_cast<Linear>(blocks["head"]);
 
-            x = norm->forward(ctx, x);
-            x = ggml_add(ctx->ggml_ctx, x, modulate_mul(ctx->ggml_ctx, x, es[1]));
-            x = modulate_add(ctx->ggml_ctx, x, es[0]);
+            x = modulate_time(ctx, norm->forward(ctx, x), es[0], es[1]);
             x = head->forward(ctx, x);
             return x;
         }

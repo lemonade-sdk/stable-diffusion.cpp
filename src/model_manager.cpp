@@ -2453,8 +2453,10 @@ ModelManager::CapacityCheck ModelManager::check_capacity(
     const size_t prefetch_reused_bytes = request.prefetch_buffer && request.prefetch_buffer->buffer ? request.prefetch_buffer->bytes : 0;
     const size_t reused_bytes          = add(request.reused_buffer_bytes, prefetch_reused_bytes);
     const size_t pending_bytes         = add(request.pending_allocation_bytes, missing);
-    result.required_device_bytes       = add(pending_bytes - std::min(pending_bytes, reused_bytes), safety_margin);
-    result.required_budget_bytes       = add(request.runtime_peak_bytes(), missing);
+    const size_t allocation_bytes      = pending_bytes - std::min(pending_bytes, reused_bytes);
+    // WDDM can report zero free memory even after all buffers for the graph have been allocated.
+    result.required_device_bytes = allocation_bytes == 0 ? 0 : add(allocation_bytes, safety_margin);
+    result.required_budget_bytes = add(request.runtime_peak_bytes(), missing);
 
     const bool allow_reclamation = check == DeviceMemoryCheck::Reclaimable;
     std::vector<ggml_tensor*> protected_params;
